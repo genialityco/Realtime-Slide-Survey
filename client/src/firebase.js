@@ -19,6 +19,6 @@ export const auth = getAuth(app);
 
 if (useEmulators) {
   const host = location.hostname;
-  connectFirestoreEmulator(db, host, 8080);
-  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFirestoreEmulator(db, host, Number(env.VITE_FIRESTORE_EMULATOR_PORT) || 8080);
+  connectAuthEmulator(auth, `http://${host}:${env.VITE_AUTH_EMULATOR_PORT || 9099}`, { disableWarnings: true });
 }

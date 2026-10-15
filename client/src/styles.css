@@ -190,14 +190,31 @@ button.big { padding: 14px; font-size: 1.05rem; }
 .screen--message { color: #fff; }
 .screen__stage { position: relative; width: min(100vw, calc(100vh * 16 / 9)); }
 .screen__stage .slide { border-radius: 0; box-shadow: none; }
-.screen__qr {
-  position: absolute; inset: 0; background: rgba(255, 255, 255, 0.97); color: #123f47;
-  display: flex; align-items: center; justify-content: center; gap: 5%; font-size: 2.2vw;
+/* Bottom-right corner: QR card and projector controls (sized relative to the stage width). */
+.screen__stage { container-type: inline-size; }
+.screen .slide__footer { text-align: left; }
+/* Keep options and the results chart clear of the QR card in the bottom-right corner. */
+.screen__stage--qr .slide__options,
+.screen__stage--qr .chart { margin-right: 16cqw; }
+.screen__corner {
+  position: absolute; right: 1.6cqw; bottom: 1.6cqw;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.8cqw;
 }
-.screen__qr .qr { width: 32%; height: auto; }
-.screen__qr-text { display: flex; flex-direction: column; gap: 0.6em; font-weight: 600; }
-.screen__url { font-size: 0.8em; color: #1f7f8c; word-break: break-all; }
-.screen__qr b { letter-spacing: 0.12em; font-size: 1.4em; }
+.screen__qr-card {
+  width: 17cqw; padding: 1cqw 1cqw 0.8cqw; background: #fff; border-radius: 1cqw; text-align: center;
+  box-shadow: 0 0.4cqw 1.6cqw rgba(0, 0, 0, 0.25); color: #123f47;
+}
+.screen__qr-card .qr { display: block; width: 100%; height: auto; }
+.screen__qr-caption { font-weight: 700; font-size: 1.3cqw; margin-top: 0.5cqw; }
+.screen__qr-url { font-size: 0.9cqw; color: #1f7f8c; word-break: break-all; }
+.screen__controls { display: flex; gap: 0.5cqw; }
+.screen__btn {
+  font-size: 0.9cqw; padding: 0.4cqw 0.9cqw; border-radius: 0.5cqw; cursor: pointer;
+  background: rgba(18, 63, 71, 0.85); color: #fff; border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.screen__btn:hover:not(:disabled) { background: #123f47; border-color: #fff; }
+.screen__btn--ghost { opacity: 0; transition: opacity 0.2s; }
+.screen__btn--ghost:hover, .screen__btn--ghost:focus-visible { opacity: 1; }
 
 .report-item { margin: 24px 0; }
 
