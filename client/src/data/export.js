@@ -1,4 +1,4 @@
-import { letter } from './repo.js';
+import { letter } from '../letter.js';
 
 // Semicolon-separated with a UTF-8 BOM so Excel (es-CO locale) opens it with accents and columns intact.
 const SEP = ';';
@@ -37,18 +37,28 @@ export function resultsCsv(report) {
 }
 
 /** One row per registered attendee, one column per poll with the chosen option. */
-export function attendeesCsv(data) {
-  const header = ['Nombre', 'Cédula', 'Correo', 'Fecha de registro', ...data.polls.map(pollLabel)];
-  const rows = data.attendees.map((a) => [
+export function attendeesCsv(report) {
+  const header = ['Nombre', 'Cédula', 'Correo', 'Fecha de registro', ...report.polls.map(pollLabel)];
+  const rows = report.attendees.map((a) => [
     a.name,
     a.cedula,
     a.email,
     localTime(a.registeredAt),
-    ...data.polls.map((p) => {
-      const optionId = data.voteOf(p.pollInstanceId, a.id);
+    ...report.polls.map((p) => {
+      const optionId = report.voteOf(p.slideId, a.cedula);
       const i = p.options.findIndex((o) => o.id === optionId);
       return i < 0 ? '' : `${letter(i)}. ${p.options[i].text}`;
     }),
   ]);
   return toCsv([header, ...rows]);
+}
+
+/** Triggers a browser download of `text` as `filename`. */
+export function downloadText(filename, text, type = 'text/csv;charset=utf-8') {
+  const href = URL.createObjectURL(new Blob([text], { type }));
+  const a = Object.assign(document.createElement('a'), { href, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(href);
 }

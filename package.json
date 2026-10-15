@@ -2,17 +2,20 @@
   "name": "realtime-slide-survey",
   "private": true,
   "workspaces": [
-    "server",
     "client"
   ],
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev": "concurrently -k -n firebase,vite -c yellow,green \"firebase emulators:start --only auth,firestore --project demo-rss\" \"npm run dev:client\"",
+    "dev:client": "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 && node scripts/dev-admin.mjs && npm run dev -w client -- --mode emulator",
     "build": "npm run build -w client",
-    "start": "npm start -w server",
-    "test": "npm test -w server",
-    "seed:simposio": "npm run seed:simposio -w server"
+    "test": "firebase emulators:exec --only auth,firestore --project demo-rss \"node --test tests/\"",
+    "deploy": "npm run build && firebase deploy --only hosting,firestore"
   },
   "devDependencies": {
-    "concurrently": "^9.0.1"
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "concurrently": "^9.0.1",
+    "firebase-admin": "^12.7.0",
+    "firebase-tools": "^13.35.1",
+    "wait-on": "^8.0.1"
   }
 }

@@ -1,11 +1,5 @@
-// Creates the "Simposio de Leucemias Agudas y Crónicas" presentation.
-// CLI: npm run seed:simposio   (same DB as the server: DATA_DIR / DB_FILE)
-// The server also calls seedSimposio() on an empty database when SEED_ON_EMPTY=simposio.
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
-import { openDb } from './db.js';
-import { createRepo } from './repo.js';
+// Template: "Simposio de Leucemias Agudas y Crónicas" (cover 1.jpg, questions over 2.jpg).
+import { addSlide, createPresentation, duplicateSlide, getPresentation, updateSlide } from './presentations.js';
 
 // Colours sampled from 2.jpg: dark teal headings, light teal accents.
 const pollStyle = {
@@ -20,19 +14,19 @@ const pollStyle = {
 
 const coverStyle = { ...pollStyle, background: '#123f47', backgroundImage: '/media/1.jpg', contentTop: 0 };
 
-export function seedSimposio(repo) {
-  const p = repo.createPresentation('Simposio de Leucemias Agudas y Crónicas — Encuestas');
+export async function seedSimposio(db) {
+  const p = await createPresentation(db, 'Simposio de Leucemias Agudas y Crónicas — Encuestas');
 
-  repo.addSlide(p.id, { type: 'content', question: '', body: '', style: coverStyle });
+  await addSlide(db, p.id, { type: 'content', question: '', body: '', style: coverStyle });
 
   /** Adds the initial-vote slide, duplicates it for the re-vote and relabels both titles. */
-  function voteAndRevote({ title, body, question, options }) {
-    const initial = repo.addSlide(p.id, { title: `${title} · Votación inicial`, body, question, options, style: pollStyle });
-    const revote = repo.duplicateSlide(initial.id);
-    repo.updateSlide(revote.id, { title: `${title} · Revotación` });
+  async function voteAndRevote({ title, body, question, options }) {
+    const initial = await addSlide(db, p.id, { title: `${title} · Votación inicial`, body, question, options, style: pollStyle });
+    const revote = await duplicateSlide(db, p.id, initial.id);
+    await updateSlide(db, p.id, revote.id, { title: `${title} · Revotación` });
   }
 
-  voteAndRevote({
+  await voteAndRevote({
     title: '1. Contrapunteo: Manejo del SMD de bajo riesgo con anemia refractaria',
     body:
       'Mujer de 74 años con SMD con mutación de SF3B1 y sideroblastos en anillo, IPSS-M bajo, cariotipo normal. ' +
@@ -47,7 +41,7 @@ export function seedSimposio(repo) {
     ],
   });
 
-  voteAndRevote({
+  await voteAndRevote({
     title: '2. Contrapunteo: SMD de alto riesgo, ¿quién y cuándo va a trasplante alogénico?',
     body:
       'Hombre de 61 años con SMD con exceso de blastos (12 % de blastos en médula ósea), cariotipo normal, ' +
@@ -61,7 +55,7 @@ export function seedSimposio(repo) {
     ],
   });
 
-  repo.addSlide(p.id, {
+  await addSlide(db, p.id, {
     title: 'Pregunta 3.1',
     question:
       '¿Está usted de acuerdo en participar en el grupo colombiano mielodisplasia de ACHO, ' +
@@ -70,18 +64,12 @@ export function seedSimposio(repo) {
     style: pollStyle,
   });
 
-  repo.addSlide(p.id, {
+  await addSlide(db, p.id, {
     title: 'Pregunta 3.2',
     question: '¿Considera usted que en Colombia los pacientes con mielodisplasia tienen infradiagnóstico?',
     options: ['Sí, de manera importante.', 'Sí, en grado moderado.', 'No.', 'No tengo una opinión formada.'],
     style: pollStyle,
   });
 
-  return repo.getPresentation(p.id);
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const created = seedSimposio(createRepo(openDb(config.dbFile)));
-  console.log(`Presentación creada: ${created.title} (${created.id})`);
-  for (const s of created.slides) console.log(`  ${s.position + 1}. [${s.type}] ${s.title || s.question || '(portada)'}`);
+  return getPresentation(db, p.id);
 }

@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api } from '../api.js';
+import { db } from '../firebase.js';
+import {
+  addSlide,
+  deleteSlide,
+  duplicateSlide,
+  getPresentation,
+  moveSlide,
+  renamePresentation,
+  updateSlide,
+} from '../data/presentations.js';
+import { listSessions, startSession } from '../data/sessions.js';
+import { formatDate } from '../local.js';
 import SlideView from '../components/SlideView.jsx';
 import { plural } from '../letter.js';
 
@@ -13,7 +24,7 @@ export default function Editor() {
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    const [p, s] = await Promise.all([api.getPresentation(id), api.listSessions(id)]);
+    const [p, s] = await Promise.all([getPresentation(db, id), listSessions(db, id)]);
     setPresentation(p);
     setSessions(s);
   }, [id]);
@@ -37,38 +48,38 @@ export default function Editor() {
   const selected = slides.find((s) => s.id === selectedId) ?? slides[0];
 
   const addSlide = run(async (type) => {
-    const s = await api.addSlide(id, { type });
+    const s = await addSlide(db, id, { type });
     await load();
     setSelectedId(s.id);
   });
 
   const duplicate = run(async (slide, position) => {
-    const copy = await api.duplicateSlide(slide.id, position);
+    const copy = await duplicateSlide(db, id, slide.id, position);
     await load();
     setSelectedId(copy.id);
   });
 
   const move = run(async (slide, position) => {
-    setPresentation(await api.moveSlide(slide.id, position));
+    setPresentation(await moveSlide(db, id, slide.id, position));
   });
 
   const remove = run(async (slide) => {
     if (!confirm('¿Eliminar esta diapositiva? Los resultados de sesiones pasadas se conservan.')) return;
-    setPresentation(await api.deleteSlide(slide.id));
+    setPresentation(await deleteSlide(db, id, slide.id));
     setSelectedId(null);
   });
 
   const save = run(async (slide, patch) => {
-    const updated = await api.updateSlide(slide.id, patch);
+    const updated = await updateSlide(db, id, slide.id, patch);
     setPresentation((p) => ({ ...p, slides: p.slides.map((s) => (s.id === updated.id ? updated : s)) }));
   });
 
   const rename = run(async (title) => {
-    if (title !== presentation.title) setPresentation(await api.renamePresentation(id, title));
+    if (title !== presentation.title) setPresentation(await renamePresentation(db, id, title));
   });
 
   const start = run(async () => {
-    const session = await api.startSession(id);
+    const session = await startSession(db, id);
     navigate(`/present/${session.id}`);
   });
 
@@ -134,7 +145,7 @@ export default function Editor() {
           {sessions.map((s) => (
             <li key={s.id}>
               <span className={`badge badge--${s.status}`}>{s.status === 'live' ? 'En vivo' : 'Finalizada'}</span>
-              <span>{new Date(s.startedAt).toLocaleString()}</span>
+              <span>{formatDate(s.startedAt)}</span>
               <span className="muted">
                 {plural(s.pollCount, 'encuesta')} · {plural(s.totalVotes, 'voto')}
               </span>
@@ -281,39 +292,26 @@ function SlideEditor({ slide, index, count, onSave, onDuplicate, onDelete }) {
 }
 
 function BackgroundImageField({ style, onChange }) {
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState('');
-
-  async function upload(file) {
-    if (!file) return;
-    setError('');
-    setUploading(true);
-    try {
-      const { url } = await api.uploadImage(file);
-      onChange({ backgroundImage: url });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setUploading(false);
-    }
-  }
-
   return (
     <fieldset>
       <legend>Imagen de fondo</legend>
       <div className="row">
         <input
+          list="bundled-images"
           placeholder="/media/2.jpg o https://…"
           value={style.backgroundImage ?? ''}
           onChange={(e) => onChange({ backgroundImage: e.target.value })}
         />
-        <label className="button">
-          {uploading ? 'Subiendo…' : 'Subir imagen'}
-          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(e) => upload(e.target.files[0])} />
-        </label>
+        <datalist id="bundled-images">
+          <option value="/media/1.jpg" />
+          <option value="/media/2.jpg" />
+        </datalist>
         {style.backgroundImage && <button onClick={() => onChange({ backgroundImage: '' })}>Quitar</button>}
       </div>
-      {error && <p className="error">{error}</p>}
+      <p className="muted small">
+        Imágenes incluidas: /media/1.jpg y /media/2.jpg. Para otras, súbelas a client/public/media y vuelve a desplegar,
+        o usa una URL https pública.
+      </p>
       <label>
         Espacio superior libre (para la cabecera de la imagen): {style.contentTop ?? 0}%
         <input

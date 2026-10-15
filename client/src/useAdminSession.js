@@ -1,37 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
-import { call, createSocket, joinUrl } from './api.js';
+import { useEffect, useState } from 'react';
+import { db } from './firebase.js';
+import { joinUrl } from './local.js';
+import { subscribeAdmin } from './data/sessions.js';
 
-/** Live admin view of a session: state pushed by the server plus a `send(event, payload)` helper. */
+/** Live admin view of a session (Firestore listeners), plus a `run(fn)` helper that reports errors. */
 export function useAdminSession(sessionId) {
-  const socketRef = useRef(null);
   const [state, setState] = useState(null);
   const [error, setError] = useState('');
-  const [connected, setConnected] = useState(false);
-  const [url, setUrl] = useState('');
 
-  useEffect(() => {
-    const socket = createSocket({ admin: true });
-    socketRef.current = socket;
-    socket.on('connect', () => {
-      setConnected(true);
-      call(socket, 'admin:join', { sessionId })
-        .then((s) => (setState(s), setError('')))
-        .catch((e) => setError(e.message));
-    });
-    socket.on('disconnect', () => setConnected(false));
-    socket.on('admin:state', setState);
-    return () => socket.close();
-  }, [sessionId]);
+  useEffect(() => subscribeAdmin(db, sessionId, setState, (e) => setError(e.message)), [sessionId]);
 
-  const code = state?.session.code;
-  useEffect(() => {
-    if (code) joinUrl(code).then(setUrl);
-  }, [code]);
+  const run = (fn) =>
+    Promise.resolve()
+      .then(fn)
+      .then(() => setError(''))
+      .catch((e) => setError(e.message));
 
-  const send = (event, payload) =>
-    call(socketRef.current, event, { sessionId, ...payload }).catch((e) => setError(e.message));
-
-  return { state, error, connected, joinUrl: url, send };
+  return { state, error, joinUrl: state ? joinUrl(state.session.code) : '', run };
 }
 
 /** Derived view of the current slide, using the session snapshot for polls. */

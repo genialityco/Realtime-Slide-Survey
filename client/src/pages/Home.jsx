@@ -1,62 +1,78 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api } from '../api.js';
+import { db } from '../firebase.js';
+import { createPresentation, listPresentations } from '../data/presentations.js';
+import { seedSimposio } from '../data/seed-simposio.js';
+import { useAdmin } from '../components/AdminGate.jsx';
+import { formatDate } from '../local.js';
 
 export default function Home() {
-  const [presentations, setPresentations] = useState([]);
+  const { user, logout } = useAdmin();
+  const [presentations, setPresentations] = useState(null);
   const [title, setTitle] = useState('');
-  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.listPresentations().then(setPresentations).catch((e) => setError(e.message));
+    listPresentations(db).then(setPresentations).catch((e) => setError(e.message));
   }, []);
 
-  async function create(e) {
-    e.preventDefault();
+  const run = (fn) => async (e) => {
+    e?.preventDefault();
+    setError('');
+    setBusy(true);
     try {
-      const p = await api.createPresentation(title || 'Nueva presentación');
+      const p = await fn();
       navigate(`/p/${p.id}`);
     } catch (err) {
       setError(err.message);
+      setBusy(false);
     }
-  }
-
-  function join(e) {
-    e.preventDefault();
-    navigate(`/join/${code.trim().toUpperCase()}`);
-  }
+  };
 
   return (
     <main className="page">
-      <h1>Realtime Slide Survey</h1>
+      <header className="toolbar">
+        <h1>Realtime Slide Survey</h1>
+        <span className="spacer" />
+        <span className="muted small">{user.email}</span>
+        <button onClick={logout}>Salir</button>
+      </header>
       {error && <p className="error">{error}</p>}
 
       <section className="card">
-        <h3>Unirse como participante</h3>
-        <form className="row" onSubmit={join}>
-          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Código (p. ej. K7QX2M)" />
-          <button disabled={!code.trim()}>Entrar</button>
+        <h3>Presentaciones</h3>
+        <form className="row" onSubmit={run(() => createPresentation(db, title || 'Nueva presentación'))}>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título de la presentación" />
+          <button disabled={busy}>Crear</button>
         </form>
+        <ul className="list">
+          {presentations?.map((p) => (
+            <li key={p.id}>
+              <Link to={`/p/${p.id}`}>{p.title}</Link>
+              <small className="muted">{formatDate(p.createdAt)}</small>
+            </li>
+          ))}
+          {presentations && !presentations.length && <li className="muted">Aún no hay presentaciones.</li>}
+          {!presentations && !error && <li className="muted">Cargando…</li>}
+        </ul>
       </section>
 
       <section className="card">
-        <h3>Presentaciones</h3>
-        <form className="row" onSubmit={create}>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título de la presentación" />
-          <button>Crear</button>
-        </form>
-        <ul className="list">
-          {presentations.map((p) => (
-            <li key={p.id}>
-              <Link to={`/p/${p.id}`}>{p.title}</Link>
-              <small className="muted">{new Date(p.createdAt).toLocaleString()}</small>
-            </li>
-          ))}
-          {!presentations.length && <li className="muted">Aún no hay presentaciones.</li>}
-        </ul>
+        <h3>Plantillas</h3>
+        <div className="row">
+          <span>Simposio de Leucemias Agudas y Crónicas (portada + 6 encuestas)</span>
+          <span className="spacer" />
+          <button disabled={busy} onClick={run(() => seedSimposio(db))}>
+            Crear desde plantilla
+          </button>
+        </div>
       </section>
+
+      <p className="muted small">
+        Los asistentes entran por el QR o en <Link to="/join">/join</Link> con el código de la sesión.
+      </p>
     </main>
   );
 }

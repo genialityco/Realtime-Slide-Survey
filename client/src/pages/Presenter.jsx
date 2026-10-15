@@ -1,20 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../api.js';
+import { db } from '../firebase.js';
+import { endSession, goToSlide, publishResults, sessionReport, setResultsVisible, setShowQr } from '../data/sessions.js';
+import { attendeesCsv, downloadText, resultsCsv } from '../data/export.js';
 import SlideView from '../components/SlideView.jsx';
 import QrCode from '../components/QrCode.jsx';
 import { plural } from '../letter.js';
 import { currentSlide, useAdminSession } from '../useAdminSession.js';
 
+const sameCounts = (published, tally) =>
+  published && published.total === tally.total && tally.options.every((o) => (published.counts?.[o.id] ?? 0) === o.votes);
+
 export default function Presenter() {
   const { sessionId } = useParams();
-  const { state, error, connected, joinUrl, send } = useAdminSession(sessionId);
-  const [exportError, setExportError] = useState('');
+  const { state, error, joinUrl, run } = useAdminSession(sessionId);
+  const publishTimer = useRef(null);
 
   const view = state && currentSlide(state);
   const live = state?.session.status === 'live';
+  const poll = view?.poll;
 
-  const go = (i) => view?.slides[i] && send('admin:goto', { slideId: view.slides[i].id });
+  const go = (i) => view?.slides[i] && run(() => goToSlide(db, sessionId, view.slides[i].id));
+
+  // The audience cannot read votes: while results are visible, this page publishes the counts
+  // (at most about once per second, and only when they changed).
+  useEffect(() => {
+    if (!poll?.resultsVisible || sameCounts(poll.published, poll) || publishTimer.current) return;
+    publishTimer.current = setTimeout(() => {
+      publishTimer.current = null;
+      run(() => publishResults(db, sessionId, poll.slideId, poll));
+    }, 800);
+  });
+  useEffect(() => () => clearTimeout(publishTimer.current), []);
 
   useEffect(() => {
     if (!view || !live) return;
@@ -29,9 +46,14 @@ export default function Presenter() {
 
   if (!state) return <main className="page">{error || 'Conectando…'}</main>;
 
-  const { session, presentation, attendeeCount, connected: online } = state;
-  const { slides, index, slide, poll, shown } = view;
-  const exportFile = (fn) => fn(session.id).catch((e) => setExportError(e.message));
+  const { session, presentation, attendeeCount } = state;
+  const { slides, index, slide, shown } = view;
+  const exportCsv = (kind) =>
+    run(async () => {
+      const report = await sessionReport(db, sessionId);
+      if (kind === 'results') downloadText(`resultados-${session.code}.csv`, resultsCsv(report));
+      else downloadText(`asistentes-${session.code}.csv`, attendeesCsv(report));
+    });
 
   return (
     <main className="page page--wide">
@@ -39,17 +61,13 @@ export default function Presenter() {
         <Link to={`/p/${presentation.id}`}>← Editor</Link>
         <strong>{presentation.title}</strong>
         <span className={`badge badge--${session.status}`}>{live ? 'En vivo' : 'Finalizada'}</span>
-        {!connected && <span className="badge">Reconectando…</span>}
         <span className="spacer" />
         <span className="stat">
           <b>{attendeeCount}</b> registrados
         </span>
-        <span className="stat">
-          <b>{online}</b> conectados
-        </span>
         <button onClick={() => window.open(`/screen/${session.id}`, `screen-${session.id}`)}>🖥 Abrir proyección</button>
       </header>
-      {(error || exportError) && <p className="error">{error || exportError}</p>}
+      {error && <p className="error">{error}</p>}
 
       {!live && (
         <p className="card">
@@ -61,7 +79,7 @@ export default function Presenter() {
         <section>
           <p className="muted small">
             Vista privada del presentador: el recuento siempre está visible aquí. El público y la proyección solo lo ven
-            si activas «Mostrar resultados».
+            si activas «Mostrar resultados». Mantén esta pestaña abierta mientras los resultados estén visibles.
           </p>
           {shown ? (
             <SlideView slide={shown} results={poll} hideBody footer={poll && <b>{plural(poll.total, 'respuesta')}</b>} />
@@ -80,16 +98,18 @@ export default function Presenter() {
               Siguiente →
             </button>
             <span className="spacer" />
-            {slide?.type === 'poll' && (
+            {slide?.type === 'poll' && poll && (
               <button
-                className={poll?.resultsVisible ? '' : 'primary'}
+                className={poll.resultsVisible ? '' : 'primary'}
                 disabled={!live}
-                onClick={() => send('admin:results', { slideId: slide.id, visible: !poll?.resultsVisible })}
+                onClick={() =>
+                  run(() => setResultsVisible(db, sessionId, slide.id, !poll.resultsVisible, poll.resultsVisible ? null : poll))
+                }
               >
-                {poll?.resultsVisible ? 'Ocultar resultados' : 'Mostrar resultados'}
+                {poll.resultsVisible ? 'Ocultar resultados' : 'Mostrar resultados'}
               </button>
             )}
-            <button disabled={!live} onClick={() => send('admin:qr', { visible: !session.showQr })}>
+            <button disabled={!live} onClick={() => run(() => setShowQr(db, sessionId, !session.showQr))}>
               {session.showQr ? 'Ocultar QR en proyección' : 'Mostrar QR en proyección'}
             </button>
           </div>
@@ -107,8 +127,8 @@ export default function Presenter() {
               </a>
               {/^https?:\/\/(localhost|127\.)/.test(joinUrl) && (
                 <p className="warn small">
-                  Este enlace usa «localhost» y no funcionará en los celulares. Abre el panel con la IP de este equipo o
-                  configura PUBLIC_URL.
+                  Este enlace usa «localhost» y no funcionará en los celulares. Usa la versión publicada en Firebase
+                  Hosting o abre el panel con la IP de este equipo.
                 </p>
               )}
             </div>
@@ -134,13 +154,15 @@ export default function Presenter() {
           })}
           <div className="card">
             <div className="row">
-              <button onClick={() => exportFile(api.exportResults)}>⬇ Resultados (CSV)</button>
-              <button onClick={() => exportFile(api.exportAttendees)}>⬇ Asistentes y respuestas (CSV)</button>
+              <button onClick={() => exportCsv('results')}>⬇ Resultados (CSV)</button>
+              <button onClick={() => exportCsv('attendees')}>⬇ Asistentes y respuestas (CSV)</button>
             </div>
             <button
               className="danger"
               disabled={!live}
-              onClick={() => confirm('¿Finalizar la sesión? Los resultados quedarán guardados.') && send('admin:end')}
+              onClick={() =>
+                confirm('¿Finalizar la sesión? Los resultados quedarán guardados.') && run(() => endSession(db, sessionId))
+              }
             >
               Finalizar sesión
             </button>
