@@ -1,5 +1,5 @@
 // Audience side: one-time registration per phone, following the projected slide, voting.
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { ROOT, slideById } from '../simposio.js';
 import { AppError, normalizeAttendee, withOptions } from './model.js';
 
@@ -29,6 +29,8 @@ export async function register(db, uid, form) {
   const fields = { ...data, uid, consentimiento: true, updatedAt: serverTimestamp() };
   const device = { cedula: data.cedula, nombre: data.nombre };
 
+  // With protective rules, attendees cannot read others' registrations: try "new registration" first,
+  // and fall back to taking the existing one over. With open rules the first write simply succeeds.
   const first = writeBatch(db);
   first.set(asistenteRef(db, data.cedula), { ...fields, createdAt: serverTimestamp() });
   first.set(dispositivoRef(db, uid), device);
@@ -113,13 +115,26 @@ export function subscribe(db, cedula, onChange, onError = console.error) {
   };
 }
 
+/**
+ * Casts a vote atomically: only while that question is projected in that session, and only once.
+ * (The project's Firestore rules are open, so these checks run here, inside a transaction.)
+ */
 export async function vote(db, uid, sid, slideId, cedula, opcion) {
+  const closed = 'No se registró el voto: la pregunta ya se cerró.';
   try {
-    await setDoc(votoRef(db, sid, slideId, cedula), { slideId, cedula, opcion, uid, createdAt: serverTimestamp() });
+    await runTransaction(db, async (tx) => {
+      const [evento, existing] = await Promise.all([
+        tx.get(doc(db, ROOT, 'evento')),
+        tx.get(votoRef(db, sid, slideId, cedula)),
+      ]);
+      const e = evento.data();
+      if (!e || e.status !== 'live' || e.sessionId !== sid || e.slideId !== slideId) throw new AppError(closed);
+      if (!slideById(slideId)?.options?.some((o) => o.id === opcion)) throw new AppError('Opción no válida.');
+      if (existing.exists()) throw new AppError('Ya habías votado en esta pregunta.');
+      tx.set(votoRef(db, sid, slideId, cedula), { slideId, cedula, opcion, uid, createdAt: serverTimestamp() });
+    });
   } catch (err) {
-    if (isDenied(err)) {
-      throw new AppError('No se registró el voto: la pregunta ya se cerró o ya habías votado.');
-    }
+    if (isDenied(err)) throw new AppError(`${closed} (o ya habías votado)`);
     throw err;
   }
 }

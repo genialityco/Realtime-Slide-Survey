@@ -1,0 +1,13 @@
+# Alternative hosting (the event runs on Firebase Hosting: https://simposio-leucemias.web.app).
+# In Netlify define the VITE_FIREBASE_* variables from client/.env.example (Site settings → Environment).
+[build]
+  command = "npm run build"
+  publish = "client/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

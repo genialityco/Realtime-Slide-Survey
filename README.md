@@ -4,6 +4,8 @@ App exclusiva para el simposio (16 y 17 de octubre de 2026): las 7 diapositivas 
 [client/src/simposio.js](client/src/simposio.js) — portada (1.jpg) y 6 preguntas sobre 2.jpg, con votación
 inicial y revotación de los dos contrapunteos.
 
+Publicada en **https://simposio-leucemias.web.app** (admin: **/admin**, proyección: **/proyeccion**).
+
 Corre sobre **Firebase**, proyecto `lenovo-experiences`, y todo vive en una sola colección:
 **`simposio_leucemias_2026`**.
 
@@ -36,16 +38,27 @@ simposio_leucemias_2026/
 
 ## Reglas de Firestore (proyecto compartido)
 
-[firestore.rules](firestore.rules) se despliega para **todo** el proyecto. Conserva el comportamiento previo
-(lectura/escritura abiertas) para todas las demás colecciones y protege solo `simposio_leucemias_2026`.
-Si otro equipo despliega reglas a `lenovo-experiences`, debe incluir el bloque del simposio.
+Las reglas de `lenovo-experiences` **no se modificaron**: hoy son abiertas para todo el proyecto
+(`allow read, write: if true`), incluida esta colección. Por eso la app hace sus propias comprobaciones
+(votar solo la pregunta proyectada, una vez, con una opción válida) dentro de transacciones. Eso protege frente a
+usuarios normales, no frente a alguien que manipule Firestore a propósito, y los datos personales son legibles
+por cualquiera que conozca el proyecto.
+
+[firestore.simposio-protegido.rules](firestore.simposio-protegido.rules) es una versión lista para aplicar que deja
+el resto del proyecto exactamente igual y protege solo `simposio_leucemias_2026` (probada en `npm test`).
+No se despliega automáticamente: `firebase.json` no incluye Firestore.
+
+## Netlify (alternativa)
+
+[netlify.toml](netlify.toml) ya está listo: en Netlify conecta el repo y define las variables `VITE_FIREBASE_*`
+(ver [client/.env.example](client/.env.example)). Firestore y Auth siguen siendo los de Firebase.
 
 ## Desarrollo y pruebas
 
 ```bash
 npm install
 npm run dev     # emuladores + Vite: http://localhost:5173 (público) y /admin (admin@example.com / admin123)
-npm test        # pruebas de reglas y del flujo completo contra el emulador (requiere Java 11+)
+npm test        # 10 pruebas: flujo con reglas abiertas (como producción) y con las reglas protegidas
 ```
 
 ## Despliegue
@@ -54,7 +67,7 @@ Configuración web del proyecto en `client/.env.production.local` (plantilla: [c
 
 ```bash
 npx firebase login
-npm run deploy  # build + firestore:rules + hosting:simposio (sitio simposio-leucemias, no toca el de Lenovo)
+npm run deploy  # build + hosting:simposio (sitio simposio-leucemias; no toca el sitio ni las reglas de Lenovo)
 ```
 
 Admins: usuario de Firebase Auth (correo/contraseña) cuyo UID esté en `simposio_leucemias_2026/admins.uids`.

@@ -28,7 +28,7 @@ before(async () => {
   setLogLevel('silent'); // expected PERMISSION_DENIED writes would otherwise flood the output
   env = await initializeTestEnvironment({
     projectId: 'demo-rss',
-    firestore: { rules: readFileSync('firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 },
+    firestore: { rules: readFileSync('firestore.simposio-protegido.rules', 'utf8'), host: '127.0.0.1', port: 8080 },
   });
 });
 
@@ -162,7 +162,7 @@ test('votes only on the projected question, as yourself, with a valid option, on
   await assert.rejects(ana.vote(sid, 'p2-inicial', '111111', 'A')); // not the projected question
   await assert.rejects(ana.vote('other-session', 'p1-inicial', '111111', 'A')); // not the live session
   await ana.vote(sid, 'p1-inicial', '111111', 'B');
-  await assert.rejects(ana.vote(sid, 'p1-inicial', '111111', 'C'), /ya habías votado/);
+  await assert.rejects(ana.vote(sid, 'p1-inicial', '111111', 'C'), /habías votado/);
 
   await go('p3-1');
   await assert.rejects(bob.vote(sid, 'p3-1', '222222', 'D')); // 3.1 only has A–C
@@ -286,4 +286,32 @@ test('CSV exports: totals per question and each attendee answers', async () => {
   const totals = resultsCsv(report).replace('﻿', '').trim().split('\r\n');
   assert.equal(totals.length, 1 + 4 * 5 + 3);
   assert.equal(SLIDES.length, 7);
+});
+
+// ── Production today: the project's rules are open, the app enforces its own checks ──
+
+test('with open rules (as deployed), the app still votes once and only on the projected question', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore(); // no rules at all, like `allow read, write: if true`
+    await setDoc(doc(db, ROOT, 'admins'), { uids: ['admin-1'] });
+    const sid = await startSession(db, 'Día 1');
+    const reg = await register(db, 'ana', { nombre: 'Ana Pérez', cedula: '111111', correo: 'ana@x.co', consentimiento: true });
+    assert.deepEqual(await myRegistration(db, 'ana'), reg);
+
+    const ev = async () => (await getDoc(eventoRef(db))).data();
+    await assert.rejects(vote(db, 'ana', sid, 'p1-inicial', '111111', 'A'), /cerró/); // cover projected
+    await goToSlide(db, await ev(), 'p1-inicial');
+    await assert.rejects(vote(db, 'ana', sid, 'p1-inicial', '111111', 'Z'), /no válida/);
+    await assert.rejects(vote(db, 'ana', 'otra', 'p1-inicial', '111111', 'A'), /cerró/);
+    await vote(db, 'ana', sid, 'p1-inicial', '111111', 'B');
+    await assert.rejects(vote(db, 'ana', sid, 'p1-inicial', '111111', 'C'), /habías votado/);
+    await goToSlide(db, await ev(), 'p1-revotacion');
+    await assert.rejects(vote(db, 'ana', sid, 'p1-inicial', '111111', 'C'), /cerró/);
+    await vote(db, 'ana', sid, 'p1-revotacion', '111111', 'C');
+
+    const report = await sessionReport(db, sid);
+    const counts = (id) => report.polls.find((p) => p.slideId === id).options.map((o) => o.votes);
+    assert.deepEqual(counts('p1-inicial'), [0, 1, 0, 0]);
+    assert.deepEqual(counts('p1-revotacion'), [0, 0, 1, 0]);
+  });
 });
