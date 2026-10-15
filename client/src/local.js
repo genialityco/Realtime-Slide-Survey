@@ -1,25 +1,36 @@
-// Per-browser state and URLs.
+// Per-browser helpers and URLs.
 
-function storage(fn, fallback = null) {
-  try {
-    return fn(localStorage);
-  } catch {
-    return fallback;
-  }
-}
-
-/** The registration made from this browser for a given session ({ cedula, name }). */
-export const attendeeStore = {
-  get: (sessionId) => storage((s) => JSON.parse(s.getItem(`rss.attendee.${sessionId}`) || 'null')),
-  set: (sessionId, attendee) => storage((s) => s.setItem(`rss.attendee.${sessionId}`, JSON.stringify(attendee))),
-  clear: (sessionId) => storage((s) => s.removeItem(`rss.attendee.${sessionId}`)),
-};
-
-/** URL the audience opens (VITE_PUBLIC_URL when set, else this site). */
-export function joinUrl(code) {
+/** URL the audience opens from the QR: the site root (VITE_PUBLIC_URL when set). */
+export function joinUrl() {
   const base = import.meta.env.VITE_PUBLIC_URL || location.origin;
-  return `${base.replace(/\/$/, '')}/join/${code}`;
+  return `${base.replace(/\/$/, '')}/`;
 }
+
+/** Cached registration of this phone, so the form never flashes for people already registered. */
+export const registrationCache = {
+  get(uid) {
+    try {
+      const v = JSON.parse(localStorage.getItem('rss.registro') || 'null');
+      return v?.uid === uid ? v : null;
+    } catch {
+      return null;
+    }
+  },
+  set(uid, registration) {
+    try {
+      localStorage.setItem('rss.registro', JSON.stringify({ ...registration, uid }));
+    } catch {
+      /* private mode: Firestore still remembers the device */
+    }
+  },
+  clear() {
+    try {
+      localStorage.removeItem('rss.registro');
+    } catch {
+      /* ignore */
+    }
+  },
+};
 
 /** Formats a Firestore Timestamp (or ISO string) for display; '' when not set yet. */
 export function formatDate(value) {

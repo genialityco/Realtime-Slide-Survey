@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase.js';
+import { isAdmin } from '../data/evento.js';
 
 const AdminContext = createContext(null);
 export const useAdmin = () => useContext(AdminContext);
 
-/** Requires a Firebase Auth user listed in admins/{uid} before rendering admin pages. */
+/** Requires a Firebase Auth user listed in simposio_leucemias_2026/admins before rendering admin pages. */
 export default function AdminGate({ children }) {
   const [status, setStatus] = useState('checking'); // checking | ok | login | forbidden
   const [user, setUser] = useState(null);
@@ -16,8 +16,7 @@ export default function AdminGate({ children }) {
       onAuthStateChanged(auth, async (u) => {
         setUser(u);
         if (!u || u.isAnonymous) return setStatus('login');
-        const snap = await getDoc(doc(db, 'admins', u.uid)).catch(() => null);
-        setStatus(snap?.exists() ? 'ok' : 'forbidden');
+        setStatus((await isAdmin(db, u.uid)) ? 'ok' : 'forbidden');
       }),
     [],
   );
@@ -31,8 +30,7 @@ export default function AdminGate({ children }) {
       <main className="page page--narrow">
         <h2>Sin permisos de administrador</h2>
         <p>
-          La cuenta <b>{user?.email}</b> no está en la colección <code>admins</code> de Firestore (UID:{' '}
-          <code>{user?.uid}</code>).
+          La cuenta <b>{user?.email}</b> no es administradora del simposio (UID: <code>{user?.uid}</code>).
         </p>
         <button onClick={() => signOut(auth)}>Cerrar sesión</button>
       </main>
@@ -62,7 +60,7 @@ function Login() {
 
   return (
     <main className="page page--narrow">
-      <h2>Acceso de administrador</h2>
+      <h2>Administración del simposio</h2>
       <form className="card form" onSubmit={submit}>
         <label>
           Correo

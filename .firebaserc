@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "lenovo-experiences"
+  },
+  "targets": {
+    "lenovo-experiences": {
+      "hosting": {
+        "simposio": ["simposio-leucemias"]
+      }
+    }
+  }
+}

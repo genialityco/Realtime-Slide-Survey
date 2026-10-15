@@ -9,7 +9,7 @@
     "dev:client": "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 && node scripts/dev-admin.mjs && npm run dev -w client -- --mode emulator",
     "build": "npm run build -w client",
     "test": "firebase emulators:exec --only auth,firestore --project demo-rss \"node --test tests/\"",
-    "deploy": "npm run build && firebase deploy --only hosting,firestore"
+    "deploy": "npm run build && firebase deploy --only firestore:rules,hosting:simposio"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth, db } from '../firebase.js';
-import { castVote, findLiveSession, registerAttendee, subscribeAudience } from '../data/audience.js';
-import { attendeeStore } from '../local.js';
+import { myRegistration, register, subscribe, vote } from '../data/publico.js';
+import { registrationCache } from '../local.js';
+import { SLIDES, TITLE } from '../simposio.js';
 import SlideView from '../components/SlideView.jsx';
 import { letter } from '../letter.js';
 
-/** Signs the visitor in anonymously (invisible to them) so the rules can tie votes to a device. */
+/** Anonymous Firebase user (invisible to the person); it persists on the phone, so it identifies the device. */
 function useAnonymousUser() {
   const [user, setUser] = useState(null);
   const [error, setError] = useState('');
@@ -23,82 +23,50 @@ function useAnonymousUser() {
 }
 
 export default function Audience() {
-  const { code } = useParams();
   const { user, error: authError } = useAnonymousUser();
-  const [info, setInfo] = useState(null); // { sessionId, title, cover }
-  const [attendee, setAttendee] = useState(null); // { cedula, name }
+  const [registration, setRegistration] = useState(undefined); // undefined = checking, null = needs the form
   const [error, setError] = useState('');
 
+  // Registration is asked once per phone: the cache shows the live view instantly; Firestore confirms it.
   useEffect(() => {
-    if (!code || !user) return;
-    setError('');
-    findLiveSession(db, code)
-      .then((i) => {
-        setInfo(i);
-        setAttendee(attendeeStore.get(i.sessionId));
+    if (!user) return;
+    const cached = registrationCache.get(user.uid);
+    if (cached) setRegistration(cached);
+    myRegistration(db, user.uid)
+      .then((r) => {
+        if (r) registrationCache.set(user.uid, r);
+        else registrationCache.clear();
+        setRegistration(r);
       })
-      .catch((e) => setError(e.message));
-  }, [code, user]);
+      .catch((e) => (cached ? null : setError(e.message)));
+  }, [user]);
 
-  if (!code) return <CodeForm />;
   if (authError || error) {
     return (
       <main className="page page--narrow audience">
         <p className="error">{authError || error}</p>
-        <CodeForm />
+        <button onClick={() => location.reload()}>Reintentar</button>
       </main>
     );
   }
-  if (!user || !info) return <main className="page page--narrow audience">Cargando…</main>;
+  if (!user || registration === undefined) return <main className="page page--narrow audience">Cargando…</main>;
 
-  if (!attendee) {
+  if (!registration) {
     return (
       <Registration
-        info={info}
         uid={user.uid}
-        onDone={(a) => {
-          attendeeStore.set(info.sessionId, a);
-          setAttendee(a);
+        onDone={(r) => {
+          registrationCache.set(user.uid, r);
+          setRegistration(r);
         }}
       />
     );
   }
-
-  return (
-    <Live
-      sessionId={info.sessionId}
-      uid={user.uid}
-      attendee={attendee}
-      onReset={() => {
-        attendeeStore.clear(info.sessionId);
-        setAttendee(null);
-      }}
-    />
-  );
+  return <Live uid={user.uid} registration={registration} />;
 }
 
-function CodeForm() {
-  const navigate = useNavigate();
-  const [input, setInput] = useState('');
-  return (
-    <main className="page page--narrow audience">
-      <h2>Unirse a la encuesta</h2>
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          navigate(`/join/${input.trim().toUpperCase()}`);
-        }}
-      >
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Código" autoFocus />
-        <button disabled={!input.trim()}>Entrar</button>
-      </form>
-    </main>
-  );
-}
-
-function Registration({ info, uid, onDone }) {
-  const [form, setForm] = useState({ name: '', cedula: '', email: '', consent: false });
+function Registration({ uid, onDone }) {
+  const [form, setForm] = useState({ nombre: '', cedula: '', correo: '', consentimiento: false });
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -108,23 +76,22 @@ function Registration({ info, uid, onDone }) {
     setError('');
     setSending(true);
     try {
-      onDone(await registerAttendee(db, uid, info.sessionId, form));
+      onDone(await register(db, uid, form));
     } catch (err) {
       setError(err.message);
-    } finally {
       setSending(false);
     }
   }
 
   return (
     <main className="page page--narrow audience">
-      {info.cover && <img className="audience__banner" src={info.cover} alt="" />}
-      <h2>{info.title}</h2>
-      <p className="muted">Regístrate para participar en las votaciones.</p>
+      <img className="audience__banner" src={SLIDES[0].style.backgroundImage} alt={TITLE} />
+      <h2>Encuesta en vivo</h2>
+      <p className="muted">Regístrate una sola vez para participar en las votaciones del simposio.</p>
       <form className="card form" onSubmit={submit}>
         <label>
           Nombre completo
-          <input value={form.name} onChange={(e) => set({ name: e.target.value })} autoComplete="name" required />
+          <input value={form.nombre} onChange={(e) => set({ nombre: e.target.value })} autoComplete="name" required />
         </label>
         <label>
           Cédula
@@ -140,21 +107,26 @@ function Registration({ info, uid, onDone }) {
           Correo electrónico
           <input
             type="email"
-            value={form.email}
-            onChange={(e) => set({ email: e.target.value })}
+            value={form.correo}
+            onChange={(e) => set({ correo: e.target.value })}
             autoComplete="email"
             required
           />
         </label>
         <label className="consent">
-          <input type="checkbox" checked={form.consent} onChange={(e) => set({ consent: e.target.checked })} required />
+          <input
+            type="checkbox"
+            checked={form.consentimiento}
+            onChange={(e) => set({ consentimiento: e.target.checked })}
+            required
+          />
           <span>
             Autorizo el tratamiento de mis datos personales (nombre, cédula y correo) para el registro de asistencia y
             el análisis de las respuestas de este evento, conforme a la Ley 1581 de 2012.
           </span>
         </label>
         {error && <p className="error">{error}</p>}
-        <button className="primary big" disabled={sending || !form.consent}>
+        <button className="primary big" disabled={sending || !form.consentimiento}>
           {sending ? 'Enviando…' : 'Registrarme y continuar'}
         </button>
       </form>
@@ -162,19 +134,13 @@ function Registration({ info, uid, onDone }) {
   );
 }
 
-function Live({ sessionId, uid, attendee, onReset }) {
+function Live({ uid, registration }) {
   const [state, setState] = useState(null);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
 
-  useEffect(
-    () =>
-      subscribeAudience(db, sessionId, attendee.cedula, setState, (e) =>
-        setError(e.code === 'permission-denied' ? 'Tu registro ya no es válido en este dispositivo.' : e.message),
-      ),
-    [sessionId, attendee.cedula],
-  );
+  useEffect(() => subscribe(db, registration.cedula, setState, (e) => setError(e.message)), [registration.cedula]);
 
   useEffect(() => {
     const up = () => setOnline(true);
@@ -184,11 +150,18 @@ function Live({ sessionId, uid, attendee, onReset }) {
     return () => (window.removeEventListener('online', up), window.removeEventListener('offline', down));
   }, []);
 
-  async function vote(optionId) {
+  // New slide on the projector → start at the top, drop any message from the previous question.
+  const slideId = state?.slide?.id;
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+    setError('');
+  }, [slideId]);
+
+  async function choose(opcion) {
     setError('');
     setSending(true);
     try {
-      await castVote(db, uid, sessionId, state.slide.id, attendee.cedula, optionId);
+      await vote(db, uid, state.sessionId, state.slide.id, registration.cedula, opcion);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -198,49 +171,39 @@ function Live({ sessionId, uid, attendee, onReset }) {
 
   const header = (
     <header className="audience__header">
-      <span>Hola, {attendee.name.split(' ')[0]}</span>
+      <span>Hola, {registration.nombre.split(' ')[0]}</span>
       {!online && <span className="badge">Sin conexión…</span>}
     </header>
   );
 
-  if (!state) {
+  if (!state) return <main className="page page--narrow audience">{header}Conectando…</main>;
+
+  const { slide } = state;
+  if (!slide || slide.type !== 'poll') {
     return (
       <main className="page page--narrow audience">
         {header}
-        {error ? (
-          <>
-            <p className="error">{error}</p>
-            <button onClick={onReset}>Registrarme de nuevo</button>
-          </>
-        ) : (
-          'Conectando…'
-        )}
+        <img className="audience__banner" src={SLIDES[0].style.backgroundImage} alt={TITLE} />
+        <p className="waiting">
+          {state.status === 'ended'
+            ? '¡Gracias por participar!'
+            : 'Estás registrado. Las preguntas aparecerán aquí automáticamente cuando se proyecten.'}
+        </p>
       </main>
     );
   }
 
-  if (state.status === 'ended') {
-    return (
-      <main className="page page--narrow audience">
-        {header}
-        <h2>La sesión ha finalizado</h2>
-        <p>¡Gracias por participar!</p>
-      </main>
-    );
-  }
-
-  const { slide, poll } = state;
-  const myIndex = poll?.myVote ? slide.options.findIndex((o) => o.id === poll.myVote) : -1;
+  const myIndex = state.myVote ? slide.options.findIndex((o) => o.id === state.myVote) : -1;
   const yourAnswer =
     myIndex >= 0 ? (
       <p className="voted">
         ✓ Tu respuesta: <b>{letter(myIndex)}.</b> {slide.options[myIndex].text}
       </p>
     ) : null;
-  const voteButtons = (options) => (
+  const buttons = (
     <div className="vote-options">
-      {options.map((o, i) => (
-        <button key={o.id} disabled={sending} onClick={() => vote(o.id)}>
+      {slide.options.map((o, i) => (
+        <button key={o.id} disabled={sending || !state.myVoteLoaded} onClick={() => choose(o.id)}>
           <span className="letter">{letter(i)}</span>
           <span>{o.text}</span>
         </button>
@@ -249,27 +212,19 @@ function Live({ sessionId, uid, attendee, onReset }) {
   );
 
   return (
-    <main className="page page--narrow audience">
+    <main className="page page--narrow audience" key={slide.id}>
       {header}
       {error && <p className="error">{error}</p>}
-      {!slide && <p>Esperando a que comience la presentación…</p>}
-      {slide && slide.type !== 'poll' && (
-        <>
-          <SlideView variant="mobile" slide={slide} />
-          <p className="waiting">Espera la siguiente pregunta…</p>
-        </>
-      )}
-      {slide && slide.type === 'poll' && !poll && <p>Cargando pregunta…</p>}
-      {slide && slide.type === 'poll' && poll && (
+      <div className="fade-in">
         <SlideView
           variant="mobile"
           slide={slide}
-          results={poll.resultsVisible ? poll.results : null}
-          renderOptions={(options) => yourAnswer ?? voteButtons(options)}
-          footer={poll.resultsVisible ? yourAnswer : null}
+          results={state.results}
+          renderOptions={() => yourAnswer ?? buttons}
+          footer={state.results ? yourAnswer : null}
         />
-      )}
-      {poll?.resultsVisible && poll.results && myIndex < 0 && voteButtons(slide.options)}
+        {state.results && myIndex < 0 && buttons}
+      </div>
     </main>
   );
 }

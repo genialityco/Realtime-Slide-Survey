@@ -1,99 +1,105 @@
 rules_version = '2';
 
-// Data model
-//   admins/{uid}                                       who may manage everything (created by hand)
-//   presentations/{pid}                                admin only
-//   presentations/{pid}/slides/{slideId}               admin only
-//   sessions/{sid}                                     public read (code, current slide); admin write
-//   sessions/{sid}/polls/{slideId}                     poll instance: snapshot + published results; public read
-//   sessions/{sid}/polls/{slideId}/votes/{cedula}      one vote per attendee and poll instance
-//   sessions/{sid}/attendees/{cedula}                  registration (personal data): admin read only
+// Firestore rules of the shared project lenovo-experiences.
+//
+// IMPORTANT: deploying this file replaces the rules of the WHOLE project. The first block keeps every
+// collection outside the symposium exactly as it was before (open read/write, as found on 2026-10-15);
+// only `simposio_leucemias_2026` gets its own rules. Any other team that deploys rules to this project
+// must keep the symposium block, or that collection becomes open again.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function signedIn() {
-      return request.auth != null;
+    // ── Other apps in the project: unchanged behaviour ──────────────────────
+    match /{coleccion}/{document=**} {
+      allow read, write: if coleccion != 'simposio_leucemias_2026';
     }
 
-    function isAdmin() {
-      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-
-    function session(sid) {
-      return get(/databases/$(database)/documents/sessions/$(sid)).data;
-    }
-
-    function sessionLive(sid) {
-      return session(sid).status == 'live';
-    }
-
-    match /admins/{uid} {
-      allow get: if signedIn() && request.auth.uid == uid;
-      allow list, write: if false;
-    }
-
-    match /presentations/{pid} {
-      allow read, write: if isAdmin();
-
-      match /slides/{slideId} {
-        allow read, write: if isAdmin();
+    // ── Simposio de Leucemias Agudas y Crónicas ─────────────────────────────
+    //   simposio_leucemias_2026/admins                            { uids: [...] }  (set by hand / script)
+    //   simposio_leucemias_2026/evento                            live state: session, current slide, results
+    //   simposio_leucemias_2026/evento/asistentes/{cedula}        registration (personal data)
+    //   simposio_leucemias_2026/evento/dispositivos/{uid}         which registration this phone holds
+    //   simposio_leucemias_2026/evento/sesiones/{sid}             one run (rehearsal, day 1, …)
+    //   simposio_leucemias_2026/evento/sesiones/{sid}/votos/{slideId}__{cedula}
+    match /simposio_leucemias_2026/{doc} {
+      function signedIn() {
+        return request.auth != null;
       }
-    }
+      function isAdmin() {
+        return signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/simposio_leucemias_2026/admins).data.uids;
+      }
+      function evento() {
+        return get(/databases/$(database)/documents/simposio_leucemias_2026/evento).data;
+      }
+      function asistente(cedula) {
+        return /databases/$(database)/documents/simposio_leucemias_2026/evento/asistentes/$(cedula);
+      }
+      // Must match client/src/simposio.js
+      function opcionValida(slideId, opcion) {
+        return (slideId in ['p1-inicial', 'p1-revotacion', 'p2-inicial', 'p2-revotacion', 'p3-2']
+                && opcion in ['A', 'B', 'C', 'D'])
+          || (slideId == 'p3-1' && opcion in ['A', 'B', 'C']);
+      }
 
-    match /sessions/{sid} {
-      allow read: if true;
-      allow write: if isAdmin();
+      // admins: each admin may read the list to know they are one; nobody writes it from the app.
+      // evento: everyone reads the live state; only admins drive it.
+      allow get: if doc == 'evento' || (doc == 'admins' && signedIn() && request.auth.uid in resource.data.uids);
+      allow list: if false;
+      allow write: if doc == 'evento' && isAdmin();
 
-      match /polls/{slideId} {
-        allow read: if true;
-        allow write: if isAdmin();
+      match /asistentes/{cedula} {
+        function valido(d) {
+          return d.keys().hasOnly(['nombre', 'cedula', 'correo', 'uid', 'consentimiento', 'createdAt', 'updatedAt'])
+            && d.nombre is string && d.nombre.size() >= 3 && d.nombre.size() <= 120
+            && d.correo is string && d.correo.size() <= 160
+            && d.correo.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$')
+            && d.cedula == cedula
+            && d.uid == request.auth.uid
+            && d.consentimiento == true
+            && d.updatedAt == request.time;
+        }
+        // Registering again with the same cédula (another phone) takes the registration over, keeping its votes.
+        allow create: if signedIn() && doc == 'evento' && cedula.matches('^[0-9]{5,15}$')
+          && valido(request.resource.data) && request.resource.data.createdAt == request.time;
+        allow update: if signedIn() && doc == 'evento'
+          && valido(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+        allow get: if isAdmin() || (signedIn() && resource != null && resource.data.uid == request.auth.uid);
+        allow list, delete: if isAdmin();
+      }
 
-        match /votes/{cedula} {
-          // An attendee votes once, as themselves, on the poll currently on screen, with a valid option.
-          allow create: if signedIn()
-            && get(/databases/$(database)/documents/sessions/$(sid)/attendees/$(cedula)).data.uid == request.auth.uid
-            && sessionLive(sid)
-            && session(sid).currentSlideId == slideId
-            && request.resource.data.keys().hasOnly(['optionId', 'uid', 'createdAt'])
+      match /dispositivos/{uid} {
+        // Written in the same batch as the registration it points to.
+        allow create, update: if signedIn() && doc == 'evento' && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['cedula', 'nombre'])
+          && getAfter(asistente(request.resource.data.cedula)).data.uid == uid;
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list, delete: if isAdmin();
+      }
+
+      match /sesiones/{sid} {
+        allow read, write: if doc == 'evento' && isAdmin();
+
+        match /votos/{votoId} {
+          // One vote per person and question, as themselves, only while that question is on screen.
+          allow create: if signedIn() && doc == 'evento'
+            && request.resource.data.keys().hasOnly(['slideId', 'cedula', 'opcion', 'uid', 'createdAt'])
+            && votoId == request.resource.data.slideId + '__' + request.resource.data.cedula
             && request.resource.data.uid == request.auth.uid
             && request.resource.data.createdAt == request.time
-            && request.resource.data.optionId in
-               get(/databases/$(database)/documents/sessions/$(sid)/polls/$(slideId)).data.optionIds;
-          // The current holder of the registration may read its vote (or learn there is none yet),
-          // also after taking the registration over from another phone; admins read everything.
+            && get(asistente(request.resource.data.cedula)).data.uid == request.auth.uid
+            && evento().status == 'live'
+            && evento().sessionId == sid
+            && evento().slideId == request.resource.data.slideId
+            && opcionValida(request.resource.data.slideId, request.resource.data.opcion);
+          // The holder of the registration reads its own vote (or learns there is none yet).
           allow get: if isAdmin() || (signedIn() && (
             resource == null
             || resource.data.uid == request.auth.uid
-            || get(/databases/$(database)/documents/sessions/$(sid)/attendees/$(cedula)).data.uid == request.auth.uid));
+            || get(asistente(resource.data.cedula)).data.uid == request.auth.uid));
           allow list: if isAdmin();
           allow update, delete: if false;
         }
-      }
-
-      match /attendees/{cedula} {
-        function validAttendee(d) {
-          return d.keys().hasOnly(['name', 'cedula', 'email', 'uid', 'consent', 'createdAt', 'updatedAt'])
-            && d.name is string && d.name.size() >= 3 && d.name.size() <= 120
-            && d.email is string && d.email.size() <= 160
-            && d.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$')
-            && d.cedula == cedula
-            && d.uid == request.auth.uid
-            && d.consent == true
-            && d.updatedAt == request.time;
-        }
-
-        // Registering again with the same cédula (e.g. from another phone) takes over that registration,
-        // keeping its votes; personal data is never readable by other attendees.
-        allow create: if signedIn() && sessionLive(sid)
-          && cedula.matches('^[0-9]{5,15}$')
-          && validAttendee(request.resource.data)
-          && request.resource.data.createdAt == request.time;
-        allow update: if signedIn() && sessionLive(sid)
-          && validAttendee(request.resource.data)
-          && request.resource.data.createdAt == resource.data.createdAt;
-        allow get: if isAdmin() || (signedIn() && resource != null && resource.data.uid == request.auth.uid);
-        allow list: if isAdmin();
-        allow delete: if false;
       }
     }
   }

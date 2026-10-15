@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { db } from './firebase.js';
-import { joinUrl } from './local.js';
-import { subscribeAdmin } from './data/sessions.js';
+import { goToSlide, publishResults, subscribeAdmin } from './data/evento.js';
+import { SLIDES, slideIndex } from './simposio.js';
 
-/** Live admin view of a session (Firestore listeners), plus a `run(fn)` helper that reports errors. */
-export function useAdminSession(sessionId) {
+/** Live admin view of the event (Firestore listeners), plus `run(fn)` that reports errors. */
+export function useEvento() {
   const [state, setState] = useState(null);
   const [error, setError] = useState('');
 
-  useEffect(() => subscribeAdmin(db, sessionId, setState, (e) => setError(e.message)), [sessionId]);
+  useEffect(() => subscribeAdmin(db, setState, (e) => setError(e.message)), []);
 
   const run = (fn) =>
     Promise.resolve()
@@ -16,18 +16,55 @@ export function useAdminSession(sessionId) {
       .then(() => setError(''))
       .catch((e) => setError(e.message));
 
-  return { state, error, joinUrl: state ? joinUrl(state.session.code) : '', run };
+  return { state, error, run };
 }
 
-/** Derived view of the current slide, using the session snapshot for polls. */
+/** Current slide, its index and (for polls) the live tally. */
 export function currentSlide(state) {
-  const slides = state.presentation.slides;
-  const index = slides.findIndex((s) => s.id === state.session.currentSlideId);
-  const slide = slides[index];
-  const poll = state.polls.find((p) => p.slideId === slide?.id);
-  const shown =
-    slide && poll
-      ? { ...slide, title: poll.title, body: poll.body, question: poll.question, options: poll.options, style: poll.style }
-      : slide;
-  return { slides, index, slide, poll, shown };
+  const index = Math.max(0, slideIndex(state.evento.slideId));
+  const slide = SLIDES[index];
+  const poll = state.polls.find((p) => p.slideId === slide.id) ?? null;
+  return { index, slide, poll };
+}
+
+const sameCounts = (published, t) =>
+  published && published.total === t.total && t.options.every((o) => (published.counts?.[o.id] ?? 0) === o.votes);
+
+/**
+ * The audience cannot read votes: while the current poll's results are visible, publish its counts to
+ * `evento` (at most ~once per 700 ms, only when they changed). Used by both the presenter and projector.
+ */
+export function usePublishResults(state, run) {
+  const timer = useRef(null);
+  const latest = useRef(state);
+  latest.current = state;
+
+  useEffect(() => {
+    if (!state || state.evento.status !== 'live' || !state.evento.resultsVisible || timer.current) return;
+    const { poll } = currentSlide(state);
+    if (!poll || sameCounts(state.evento.results, poll)) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      const s = latest.current;
+      const p = s && currentSlide(s).poll;
+      if (p && s.evento.resultsVisible) run(() => publishResults(db, s.evento, p));
+    }, 700);
+  });
+  useEffect(() => () => clearTimeout(timer.current), []);
+}
+
+/** Keyboard / presentation-clicker navigation (arrows, PageUp/PageDown, space). */
+export function useSlideKeys(state, run) {
+  useEffect(() => {
+    if (!state || state.evento.status !== 'live') return;
+    const { index } = currentSlide(state);
+    const go = (i) => SLIDES[i] && run(() => goToSlide(db, state.evento, SLIDES[i].id));
+    const onKey = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+      if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) (e.preventDefault(), go(index + 1));
+      if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) (e.preventDefault(), go(index - 1));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 }

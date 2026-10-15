@@ -12,5 +12,5 @@ const PASSWORD = 'admin123';
 initializeApp({ projectId: 'demo-rss' });
 const auth = getAuth();
 const user = await auth.getUserByEmail(EMAIL).catch(() => auth.createUser({ email: EMAIL, password: PASSWORD }));
-await getFirestore().doc(`admins/${user.uid}`).set({ email: EMAIL });
+await getFirestore().doc('simposio_leucemias_2026/admins').set({ uids: [user.uid] });
 console.log(`Admin local listo: ${EMAIL} / ${PASSWORD}`);

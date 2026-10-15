@@ -3,34 +3,26 @@ import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
-import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
 
-import {
-  addSlide,
-  createPresentation,
-  deleteSlide,
-  duplicateSlide,
-  getPresentation,
-  listPresentations,
-  moveSlide,
-  updateSlide,
-} from '../client/src/data/presentations.js';
+import { ROOT, SLIDES } from '../client/src/simposio.js';
 import {
   endSession,
+  eventoRef,
   goToSlide,
   publishResults,
   sessionReport,
   setResultsVisible,
   startSession,
   subscribeAdmin,
-} from '../client/src/data/sessions.js';
-import { castVote, findLiveSession, registerAttendee, subscribeAudience } from '../client/src/data/audience.js';
+} from '../client/src/data/evento.js';
+import { myRegistration, register, subscribe, vote } from '../client/src/data/publico.js';
 import { attendeesCsv, resultsCsv } from '../client/src/data/export.js';
-import { seedSimposio } from '../client/src/data/seed-simposio.js';
 
 let env;
-let admin; // Firestore as an admin
-let anon; // Firestore as a signed-in user who is not an admin
+let admin; // Firestore as the symposium admin
+let stranger; // signed in, not an admin, not registered
+let nobody; // not signed in
 
 before(async () => {
   setLogLevel('silent'); // expected PERMISSION_DENIED writes would otherwise flood the output
@@ -44,42 +36,31 @@ after(() => env.cleanup());
 
 beforeEach(async () => {
   await env.clearFirestore();
-  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'admins', 'admin-1'), { email: 'a@x.co' }));
-  admin = env.authenticatedContext('admin-1').firestore();
-  anon = env.authenticatedContext('intruder').firestore();
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), ROOT, 'admins'), { uids: ['admin-1'] }));
+  admin = env.authenticatedContext('admin-1', { email: 'admin@x.co' }).firestore();
+  stranger = env.authenticatedContext('stranger').firestore();
+  nobody = env.unauthenticatedContext().firestore();
 });
 
-/** A signed-in attendee: its Firestore, uid and registration helper. */
-function attendee(uid) {
+/** A phone: anonymous uid + its Firestore. */
+function phone(uid) {
   const db = env.authenticatedContext(uid).firestore();
   return {
     db,
     uid,
-    register: (sid, cedula, extra = {}) =>
-      registerAttendee(db, uid, sid, { name: `Persona ${uid}`, cedula, email: `${uid}@x.co`, consent: true, ...extra }),
-    vote: (sid, slideId, cedula, optionId) => castVote(db, uid, sid, slideId, cedula, optionId),
+    register: (cedula, extra = {}) =>
+      register(db, uid, { nombre: `Persona ${uid}`, cedula, correo: `${uid}@x.co`, consentimiento: true, ...extra }),
+    vote: (sid, slideId, cedula, opcion) => vote(db, uid, sid, slideId, cedula, opcion),
   };
 }
 
-async function setup() {
-  const p = await createPresentation(admin, 'Demo');
-  const intro = await addSlide(admin, p.id, { type: 'content', question: 'Bienvenida' });
-  const poll = await addSlide(admin, p.id, {
-    title: 'Caso 1',
-    body: 'Texto del caso',
-    question: '¿Cómo te sientes?',
-    options: ['Bien', 'Regular', 'Mal'],
-    style: { backgroundImage: '/media/2.jpg', contentTop: 19, accent: '#ff0000' },
-  });
-  const outro = await addSlide(admin, p.id, { type: 'content', question: 'Gracias' });
-  return { p, intro, poll, outro };
-}
+const evento = async () => (await getDoc(eventoRef(admin))).data();
+const go = async (slideId) => goToSlide(admin, await evento(), slideId);
 
-const order = async (pid) => (await getPresentation(admin, pid)).slides.map((s) => s.id);
-const waitFor = (subscribe, predicate, ms = 5000) =>
+const waitFor = (subscribeFn, predicate, ms = 5000) =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(() => (unsub(), reject(new Error('timeout'))), ms);
-    const unsub = subscribe((value) => {
+    const unsub = subscribeFn((value) => {
       if (predicate(value)) {
         clearTimeout(timer);
         setTimeout(() => unsub());
@@ -88,284 +69,221 @@ const waitFor = (subscribe, predicate, ms = 5000) =>
     });
   });
 
-// ── Presentations ──────────────────────────────────────────────────────────
+// ── The rest of the shared project is untouched ────────────────────────────
 
-test('only admins can read or write presentations', async () => {
-  await setup();
-  await assertFails(getDocs(collection(anon, 'presentations')));
-  await assertFails(setDoc(doc(anon, 'presentations', 'x'), { title: 'hack' }));
-  await assertFails(setDoc(doc(anon, 'admins', 'intruder'), {}));
-  assert.equal((await listPresentations(admin)).length, 1);
+test('other collections of the project stay exactly as open as before', async () => {
+  for (const db of [nobody, stranger]) {
+    await assertSucceeds(setDoc(doc(db, 'events', 'x'), { a: 1 }));
+    await assertSucceeds(getDoc(doc(db, 'events', 'x')));
+    await assertSucceeds(getDocs(collection(db, 'users')));
+    await assertSucceeds(setDoc(doc(db, 'organizations', 'o', 'members', 'm'), { a: 1 }));
+    await assertSucceeds(deleteDoc(doc(db, 'events', 'x')));
+    await assertSucceeds(setDoc(doc(db, 'brand_new_collection', 'y', 'deep', 'z'), { a: 1 }));
+  }
 });
 
-test('duplicate keeps title, case, question, options and style but gets new ids', async () => {
-  const { p, poll } = await setup();
-  const copy = await duplicateSlide(admin, p.id, poll.id);
-  assert.notEqual(copy.id, poll.id);
-  assert.equal(copy.sourceSlideId, poll.id);
-  assert.equal(copy.title, poll.title);
-  assert.equal(copy.body, poll.body);
-  assert.equal(copy.question, poll.question);
-  assert.deepEqual(copy.style, poll.style);
-  assert.deepEqual(copy.options.map((o) => o.text), poll.options.map((o) => o.text));
-  for (const o of copy.options) assert.ok(!poll.options.some((x) => x.id === o.id));
+test('the symposium collection is locked down', async () => {
+  await startSession(admin, 'Ensayo');
+  for (const db of [nobody, stranger]) {
+    await assertFails(setDoc(doc(db, ROOT, 'evento'), { status: 'live', slideId: 'p3-2' }));
+    await assertFails(updateDoc(doc(db, ROOT, 'evento'), { resultsVisible: true }));
+    await assertFails(setDoc(doc(db, ROOT, 'admins'), { uids: ['stranger'] }));
+    await assertFails(getDoc(doc(db, ROOT, 'admins')));
+    await assertFails(getDocs(collection(db, ROOT)));
+    await assertFails(getDocs(collection(db, ROOT, 'evento', 'asistentes')));
+    await assertFails(getDocs(collection(db, ROOT, 'evento', 'sesiones')));
+    await assertFails(setDoc(doc(db, ROOT, 'otro'), { a: 1 }));
+  }
+  await assertSucceeds(getDoc(doc(nobody, ROOT, 'evento'))); // the live state is public
+  await assertSucceeds(getDoc(doc(admin, ROOT, 'admins')));
 });
 
-test('duplicate lands after the original by default or at a position; move and delete reindex', async () => {
-  const { p, intro, poll, outro } = await setup();
-  const a = await duplicateSlide(admin, p.id, poll.id);
-  assert.deepEqual(await order(p.id), [intro.id, poll.id, a.id, outro.id]);
-  const b = await duplicateSlide(admin, p.id, poll.id, 99);
-  assert.deepEqual(await order(p.id), [intro.id, poll.id, a.id, outro.id, b.id]);
-  await moveSlide(admin, p.id, b.id, 0);
-  assert.deepEqual(await order(p.id), [b.id, intro.id, poll.id, a.id, outro.id]);
-  await deleteSlide(admin, p.id, intro.id);
-  const slides = (await getPresentation(admin, p.id)).slides;
-  assert.deepEqual(slides.map((s) => s.id), [b.id, poll.id, a.id, outro.id]);
-  assert.deepEqual(slides.map((s) => s.position), [0, 1, 2, 3]);
-});
+// ── Registration (once per phone) ──────────────────────────────────────────
 
-test('editing the copy does not touch the original', async () => {
-  const { p, poll } = await setup();
-  const copy = await duplicateSlide(admin, p.id, poll.id);
-  await updateSlide(admin, p.id, copy.id, { title: 'Caso 1 · Revotación', style: { accent: '#00ff00' } });
-  const fresh = (await getPresentation(admin, p.id)).slides.find((s) => s.id === poll.id);
-  assert.equal(fresh.title, 'Caso 1');
-  assert.equal(fresh.style.accent, '#ff0000');
-});
+test('registration is validated by the rules and remembered for the phone', async () => {
+  const ana = phone('ana');
+  assert.equal(await myRegistration(ana.db, 'ana'), null); // first visit: show the form
 
-// ── Registration ───────────────────────────────────────────────────────────
-
-test('registration: validated by the rules, private, and re-claimable by cédula', async () => {
-  const { p } = await setup();
-  const s = await startSession(admin, p.id);
-  assert.equal((await findLiveSession(anon, s.code.toLowerCase())).sessionId, s.id);
-
-  const ana = attendee('ana');
-  // Bypassing client validation does not help: the rules reject bad data.
-  const raw = (data) => setDoc(doc(ana.db, 'sessions', s.id, 'attendees', '123456'), {
-    name: 'Ana Pérez', cedula: '123456', email: 'ana@x.co', uid: 'ana', consent: true,
-    createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...data,
-  });
-  await assertFails(raw({ email: 'nope' }));
-  await assertFails(raw({ consent: false }));
+  const raw = (data) =>
+    setDoc(doc(ana.db, ROOT, 'evento', 'asistentes', '123456'), {
+      nombre: 'Ana Pérez', cedula: '123456', correo: 'ana@x.co', uid: 'ana', consentimiento: true,
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...data,
+    });
+  await assertFails(raw({ correo: 'nope' }));
+  await assertFails(raw({ consentimiento: false }));
   await assertFails(raw({ uid: 'someone-else' }));
-  await assertFails(raw({ isAdmin: true }));
-  await assertFails(setDoc(doc(ana.db, 'sessions', s.id, 'attendees', 'abc'), { cedula: 'abc' }));
-  await assertSucceeds(raw({}));
+  await assertFails(raw({ admin: true }));
+  await assert.rejects(ana.register('12'), /cédula/);
 
-  // Others cannot read personal data; the owner and admins can.
-  await assertFails(getDoc(doc(anon, 'sessions', s.id, 'attendees', '123456')));
-  await assertFails(getDocs(collection(anon, 'sessions', s.id, 'attendees')));
-  await assertSucceeds(getDoc(doc(ana.db, 'sessions', s.id, 'attendees', '123456')));
-  assert.equal((await getDocs(collection(admin, 'sessions', s.id, 'attendees'))).size, 1);
+  await ana.register('1.234.567');
+  assert.deepEqual(await myRegistration(ana.db, 'ana'), { cedula: '1234567', nombre: 'Persona ana' }); // next visit: no form
 
-  // Same cédula from another phone takes the registration over (no duplicate).
-  const phone2 = attendee('ana-phone-2');
-  await phone2.register(s.id, '123.456');
-  const row = (await getDoc(doc(admin, 'sessions', s.id, 'attendees', '123456'))).data();
-  assert.equal(row.uid, 'ana-phone-2');
-  assert.equal((await getDocs(collection(admin, 'sessions', s.id, 'attendees'))).size, 1);
+  // Personal data is private.
+  await assertFails(getDoc(doc(stranger, ROOT, 'evento', 'asistentes', '1234567')));
+  await assertFails(getDoc(doc(stranger, ROOT, 'evento', 'dispositivos', 'ana')));
+  await assertFails(setDoc(doc(stranger, ROOT, 'evento', 'dispositivos', 'stranger'), { cedula: '1234567', nombre: 'x' }));
+  assert.equal((await getDocs(collection(admin, ROOT, 'evento', 'asistentes'))).size, 1);
 });
 
-test('taking a registration over keeps its votes visible and blocks the old phone', async () => {
-  const { p, poll } = await setup();
-  const copy = await duplicateSlide(admin, p.id, poll.id);
-  const s = await startSession(admin, p.id);
-  const phone1 = attendee('ana-1');
-  await phone1.register(s.id, '123456');
-  await goToSlide(admin, s.id, poll.id);
-  await phone1.vote(s.id, poll.id, '123456', poll.options[0].id);
+test('registering with the same cédula on another phone takes it over and keeps the votes', async () => {
+  const sid = await startSession(admin, 'Día 1');
+  const phone1 = phone('ana-1');
+  await phone1.register('123456');
+  await go('p1-inicial');
+  await phone1.vote(sid, 'p1-inicial', '123456', 'A');
 
-  const phone2 = attendee('ana-2');
-  await phone2.register(s.id, '123456');
-  const vote = await getDoc(doc(phone2.db, 'sessions', s.id, 'polls', poll.id, 'votes', '123456'));
-  assert.equal(vote.data().optionId, poll.options[0].id); // sees the vote cast from phone 1
-  await assert.rejects(phone2.vote(s.id, poll.id, '123456', poll.options[1].id)); // still only once
+  const phone2 = phone('ana-2');
+  await phone2.register('123456');
+  assert.equal((await myRegistration(phone2.db, 'ana-2')).cedula, '123456');
+  const seen = await waitFor((cb) => subscribe(phone2.db, '123456', cb), (s) => s.myVoteLoaded);
+  assert.equal(seen.myVote, 'A'); // sees the vote cast from phone 1
+  await assert.rejects(phone2.vote(sid, 'p1-inicial', '123456', 'B')); // still once
 
-  await goToSlide(admin, s.id, copy.id);
-  await assert.rejects(phone1.vote(s.id, copy.id, '123456', copy.options[0].id)); // old phone lost it
-  await phone2.vote(s.id, copy.id, '123456', copy.options[1].id);
+  await go('p1-revotacion');
+  await assert.rejects(phone1.vote(sid, 'p1-revotacion', '123456', 'C')); // the old phone lost it
+  await phone2.vote(sid, 'p1-revotacion', '123456', 'C');
+  assert.equal((await getDocs(collection(admin, ROOT, 'evento', 'asistentes'))).size, 1);
 });
 
-// ── Voting ─────────────────────────────────────────────────────────────────
+// ── Voting follows the projected slide ─────────────────────────────────────
 
-test('votes: registered, as yourself, on the active poll, with a valid option, once', async () => {
-  const { p, poll } = await setup();
-  const copy = await duplicateSlide(admin, p.id, poll.id);
-  const s = await startSession(admin, p.id);
-  const ana = attendee('ana');
-  const bob = attendee('bob');
-  await ana.register(s.id, '111111');
-  await bob.register(s.id, '222222');
+test('votes only on the projected question, as yourself, with a valid option, once', async () => {
+  const sid = await startSession(admin, 'Día 1');
+  const ana = phone('ana');
+  const bob = phone('bob');
+  await ana.register('111111');
+  await bob.register('222222');
 
-  // The intro (content) is current: polls are not active yet.
-  await assert.rejects(ana.vote(s.id, poll.id, '111111', poll.options[0].id), /no está activa/);
-  await goToSlide(admin, s.id, poll.id);
+  await assert.rejects(ana.vote(sid, 'p1-inicial', '111111', 'A'), /cerró/); // cover is projected
+  await go('p1-inicial');
+  await assert.rejects(phone('ghost').vote(sid, 'p1-inicial', '999999', 'A')); // not registered
+  await assert.rejects(bob.vote(sid, 'p1-inicial', '111111', 'A')); // as someone else
+  await assert.rejects(ana.vote(sid, 'p1-inicial', '111111', 'E')); // invalid option
+  await assert.rejects(ana.vote(sid, 'p2-inicial', '111111', 'A')); // not the projected question
+  await assert.rejects(ana.vote('other-session', 'p1-inicial', '111111', 'A')); // not the live session
+  await ana.vote(sid, 'p1-inicial', '111111', 'B');
+  await assert.rejects(ana.vote(sid, 'p1-inicial', '111111', 'C'), /ya habías votado/);
 
-  await assert.rejects(attendee('ghost').vote(s.id, poll.id, '999999', poll.options[0].id)); // not registered
-  await assert.rejects(bob.vote(s.id, poll.id, '111111', poll.options[0].id)); // as someone else
-  await assert.rejects(ana.vote(s.id, poll.id, '111111', copy.options[0].id)); // option of another slide
-  await assert.rejects(ana.vote(s.id, copy.id, '111111', copy.options[0].id)); // not the active poll
-  await ana.vote(s.id, poll.id, '111111', poll.options[1].id);
-  await assert.rejects(ana.vote(s.id, poll.id, '111111', poll.options[0].id), /ya votaste/);
-  await assertFails(updateDoc(doc(ana.db, 'sessions', s.id, 'polls', poll.id, 'votes', '111111'), { optionId: 'x' }));
+  await go('p3-1');
+  await assert.rejects(bob.vote(sid, 'p3-1', '222222', 'D')); // 3.1 only has A–C
+  await bob.vote(sid, 'p3-1', '222222', 'C');
 
-  // Own vote readable; others' votes are not; only admins list them.
-  await assertSucceeds(getDoc(doc(ana.db, 'sessions', s.id, 'polls', poll.id, 'votes', '111111')));
-  await assertFails(getDoc(doc(bob.db, 'sessions', s.id, 'polls', poll.id, 'votes', '111111')));
-  await assertFails(getDocs(collection(bob.db, 'sessions', s.id, 'polls', poll.id, 'votes')));
-  // Attendees cannot tamper with the poll or the session.
-  await assertFails(updateDoc(doc(ana.db, 'sessions', s.id, 'polls', poll.id), { resultsVisible: true }));
-  await assertFails(updateDoc(doc(ana.db, 'sessions', s.id), { currentSlideId: copy.id }));
+  await go('p1-inicial'); // moving away closed it; coming back reopens it, but the vote stays single
+  await bob.vote(sid, 'p1-inicial', '222222', 'A');
+
+  await assertFails(getDocs(collection(bob.db, ROOT, 'evento', 'sesiones', sid, 'votos')));
+  await assertFails(getDoc(doc(bob.db, ROOT, 'evento', 'sesiones', sid, 'votos', 'p1-inicial__111111')));
+  await assertSucceeds(getDoc(doc(ana.db, ROOT, 'evento', 'sesiones', sid, 'votos', 'p1-inicial__111111')));
+  await assertFails(updateDoc(doc(ana.db, ROOT, 'evento', 'sesiones', sid, 'votos', 'p1-inicial__111111'), { opcion: 'A' }));
+
+  await endSession(admin, await evento());
+  await assert.rejects(bob.vote(sid, 'p1-inicial', '222222', 'B'));
 });
 
-test('original and duplicate collect votes independently; results visibility is per slide', async () => {
-  const { p, poll } = await setup();
-  const copy = await duplicateSlide(admin, p.id, poll.id);
-  const s = await startSession(admin, p.id);
-  const ana = attendee('ana');
-  const bob = attendee('bob');
-  await ana.register(s.id, '111111');
-  await bob.register(s.id, '222222');
+test('initial vote and re-vote are independent; sessions never mix; attendees persist', async () => {
+  const s1 = await startSession(admin, 'Ensayo');
+  const ana = phone('ana');
+  await ana.register('111111');
+  await go('p1-inicial');
+  await ana.vote(s1, 'p1-inicial', '111111', 'A');
+  await go('p1-revotacion');
+  await ana.vote(s1, 'p1-revotacion', '111111', 'C');
+  await endSession(admin, await evento());
 
-  await goToSlide(admin, s.id, poll.id);
-  await ana.vote(s.id, poll.id, '111111', poll.options[0].id);
-  await bob.vote(s.id, poll.id, '222222', poll.options[0].id);
-  await setResultsVisible(admin, s.id, poll.id, true);
+  const s2 = await startSession(admin, 'Día 1');
+  assert.notEqual(s1, s2);
+  assert.ok(await myRegistration(ana.db, 'ana')); // no need to register again
+  await go('p1-inicial');
+  await ana.vote(s2, 'p1-inicial', '111111', 'D');
 
-  await goToSlide(admin, s.id, copy.id);
-  await ana.vote(s.id, copy.id, '111111', copy.options[2].id); // re-vote on the copy
-
-  const report = await sessionReport(admin, s.id);
-  const r1 = report.polls.find((x) => x.slideId === poll.id);
-  const r2 = report.polls.find((x) => x.slideId === copy.id);
-  assert.notEqual(r1.pollInstanceId, r2.pollInstanceId);
-  assert.deepEqual(r1.options.map((o) => o.votes), [2, 0, 0]);
-  assert.deepEqual(r2.options.map((o) => o.votes), [0, 0, 1]);
-  assert.equal(r1.resultsVisible, true);
-  assert.equal(r2.resultsVisible, false);
+  const [r1, r2] = await Promise.all([sessionReport(admin, s1), sessionReport(admin, s2)]);
+  const counts = (r, id) => r.polls.find((p) => p.slideId === id).options.map((o) => o.votes);
+  assert.deepEqual(counts(r1, 'p1-inicial'), [1, 0, 0, 0]);
+  assert.deepEqual(counts(r1, 'p1-revotacion'), [0, 0, 1, 0]);
+  assert.deepEqual(counts(r2, 'p1-inicial'), [0, 0, 0, 1]);
+  assert.deepEqual(counts(r2, 'p1-revotacion'), [0, 0, 0, 0]);
+  assert.equal(r1.session.status, 'ended');
+  assert.equal(r2.polls[0].pollInstanceId, `${s2}:p1-inicial`);
 });
 
-test('results persist after the session ends and survive slide edits and deletes', async () => {
-  const { p, poll } = await setup();
-  const s = await startSession(admin, p.id);
-  const ana = attendee('ana');
-  await ana.register(s.id, '111111');
-  await goToSlide(admin, s.id, poll.id);
-  await ana.vote(s.id, poll.id, '111111', poll.options[0].id);
-  await endSession(admin, s.id);
+// ── Realtime sync ──────────────────────────────────────────────────────────
 
-  await assert.rejects(attendee('late').register(s.id, '333333'), /registro/);
-  await assert.rejects(findLiveSession(anon, s.code), /terminó/);
-  await updateSlide(admin, p.id, poll.id, { question: 'Otra', options: ['X', 'Y'] });
-  await deleteSlide(admin, p.id, poll.id);
+test('phones follow the projector slide by slide; results only when shown', async () => {
+  const sid = await startSession(admin, 'Día 1');
+  const ana = phone('ana');
+  await ana.register('111111');
+  const follow = (cb) => subscribe(ana.db, '111111', cb);
+  const adminView = (cb) => subscribeAdmin(admin, cb);
 
-  const report = await sessionReport(admin, s.id);
-  assert.equal(report.session.status, 'ended');
-  assert.equal(report.polls[0].question, '¿Cómo te sientes?');
-  assert.equal(report.polls[0].body, 'Texto del caso');
-  assert.equal(report.polls[0].total, 1);
-  assert.equal(report.polls[0].slideDeleted, true);
-});
+  assert.equal((await waitFor(follow, (s) => s.slide)).slide.id, 'portada');
 
-test('a new session of the same presentation starts from zero', async () => {
-  const { p, poll } = await setup();
-  const s1 = await startSession(admin, p.id);
-  const ana1 = attendee('ana');
-  await ana1.register(s1.id, '111111');
-  await goToSlide(admin, s1.id, poll.id);
-  await ana1.vote(s1.id, poll.id, '111111', poll.options[0].id);
-  await endSession(admin, s1.id);
+  const onQ1 = waitFor(follow, (s) => s.slide?.id === 'p1-inicial' && s.myVoteLoaded);
+  await go('p1-inicial');
+  const q1 = await onQ1;
+  assert.equal(q1.myVote, null);
+  assert.equal(q1.results, null);
 
-  const s2 = await startSession(admin, p.id);
-  assert.notEqual(s2.code, s1.code);
-  await ana1.register(s2.id, '111111');
-  await goToSlide(admin, s2.id, poll.id);
-  await ana1.vote(s2.id, poll.id, '111111', poll.options[2].id);
-
-  const [r1, r2] = await Promise.all([sessionReport(admin, s1.id), sessionReport(admin, s2.id)]);
-  assert.deepEqual(r1.polls[0].options.map((o) => o.votes), [1, 0, 0]);
-  assert.deepEqual(r2.polls[0].options.map((o) => o.votes), [0, 0, 1]);
-  assert.notEqual(r1.polls[0].pollInstanceId, r2.polls[0].pollInstanceId);
-});
-
-// ── Realtime ───────────────────────────────────────────────────────────────
-
-test('realtime: audience follows slides and sees results only when published', async () => {
-  const { p, poll } = await setup();
-  const copy = await duplicateSlide(admin, p.id, poll.id);
-  const s = await startSession(admin, p.id);
-  const ana = attendee('ana');
-  await ana.register(s.id, '111111');
-
-  const audience = (cb) => subscribeAudience(ana.db, s.id, '111111', cb);
-  const adminView = (cb) => subscribeAdmin(admin, s.id, cb);
-
-  const onPoll = waitFor(audience, (st) => st.slide?.id === poll.id && st.poll);
-  await goToSlide(admin, s.id, poll.id);
-  const st1 = await onPoll;
-  assert.equal(st1.poll.results, null);
-  assert.equal(st1.slide.question, '¿Cómo te sientes?');
-
-  const counted = waitFor(adminView, (st) => st.polls.find((x) => x.slideId === poll.id)?.total === 1 && st.attendeeCount === 1);
-  const myVote = waitFor(audience, (st) => st.poll?.myVote === poll.options[1].id);
-  await ana.vote(s.id, poll.id, '111111', poll.options[1].id);
+  const counted = waitFor(adminView, (s) => s.polls.find((p) => p.slideId === 'p1-inicial').total === 1 && s.attendeeCount === 1);
+  const voted = waitFor(follow, (s) => s.myVote === 'B');
+  await ana.vote(sid, 'p1-inicial', '111111', 'B');
   const adminState = await counted;
-  await myVote;
+  await voted;
 
-  const shown = waitFor(audience, (st) => st.poll?.results?.total === 1);
-  await setResultsVisible(admin, s.id, poll.id, true, adminState.polls.find((x) => x.slideId === poll.id));
-  assert.deepEqual((await shown).poll.results.options.map((o) => o.votes), [0, 1, 0]);
+  const shown = waitFor(follow, (s) => s.results?.total === 1);
+  await setResultsVisible(admin, await evento(), true, adminState.polls.find((p) => p.slideId === 'p1-inicial'));
+  assert.deepEqual((await shown).results.options.map((o) => o.votes), [0, 1, 0, 0]);
 
-  const moved = waitFor(audience, (st) => st.slide?.id === copy.id && st.poll);
-  await goToSlide(admin, s.id, copy.id);
-  const st2 = await moved;
-  assert.equal(st2.poll.myVote, null);
-  assert.equal(st2.poll.resultsVisible, false);
+  // Next slide: the previous question closes on the phone at once; the re-vote starts clean.
+  const onRevote = waitFor(follow, (s) => s.slide?.id === 'p1-revotacion' && s.myVoteLoaded);
+  await go('p1-revotacion');
+  const rv = await onRevote;
+  assert.equal(rv.myVote, null);
+  assert.equal(rv.resultsVisible, false);
 
-  const ended = waitFor(audience, (st) => st.status === 'ended');
-  await endSession(admin, s.id);
-  await ended;
-  await publishResults(admin, s.id, poll.id, adminState.polls[0]); // admin can still publish after end
+  // Going back shows the first question again with its results still visible.
+  const back = waitFor(follow, (s) => s.slide?.id === 'p1-inicial' && s.results && s.myVoteLoaded);
+  await go('p1-inicial');
+  assert.equal((await back).myVote, 'B');
+
+  const ended = waitFor(follow, (s) => s.status === 'ended');
+  await endSession(admin, await evento());
+  assert.equal((await ended).slide, null);
 });
 
-// ── Export & template ──────────────────────────────────────────────────────
+test('published results follow new votes', async () => {
+  const sid = await startSession(admin, 'Día 1');
+  const ana = phone('ana');
+  const bob = phone('bob');
+  await ana.register('111111');
+  await bob.register('222222');
+  await go('p3-2');
+  await setResultsVisible(admin, await evento(), true, { slideId: 'p3-2', total: 0, options: [] });
+  await ana.vote(sid, 'p3-2', '111111', 'A');
+  await bob.vote(sid, 'p3-2', '222222', 'A');
+  const report = await sessionReport(admin, sid);
+  await publishResults(admin, await evento(), report.polls.find((p) => p.slideId === 'p3-2'));
+  const e = await evento();
+  assert.deepEqual(e.results, { total: 2, counts: { A: 2, B: 0, C: 0, D: 0 } });
+  assert.deepEqual(e.published['p3-2'], e.results);
+});
 
-test('CSV exports list each attendee answer and the totals', async () => {
-  const { p, poll } = await setup();
-  const s = await startSession(admin, p.id);
-  await goToSlide(admin, s.id, poll.id);
-  await attendee('ana').register(s.id, '111111', { name: 'Ana; "la doc"' });
-  const bob = attendee('bob');
-  await bob.register(s.id, '222222', { name: 'Bob Ruiz' });
-  await bob.vote(s.id, poll.id, '222222', poll.options[1].id);
+// ── Export ─────────────────────────────────────────────────────────────────
 
-  const report = await sessionReport(admin, s.id);
+test('CSV exports: totals per question and each attendee answers', async () => {
+  const sid = await startSession(admin, 'Día 1');
+  await phone('ana').register('111111', { nombre: 'Ana; "la doc"' });
+  const bob = phone('bob');
+  await bob.register('222222', { nombre: 'Bob Ruiz' });
+  await go('p1-inicial');
+  await bob.vote(sid, 'p1-inicial', '222222', 'B');
+
+  const report = await sessionReport(admin, sid);
   const people = attendeesCsv(report).replace('﻿', '').trim().split('\r\n');
-  assert.equal(people[0], 'Nombre;Cédula;Correo;Fecha de registro;Diap. 2 · Caso 1');
-  assert.match(people[1], /^"Ana; ""la doc""";111111;ana@x\.co;[^;]+;$/);
-  assert.match(people[2], /^Bob Ruiz;222222;bob@x\.co;[^;]+;B\. Regular$/);
+  assert.match(people[0], /^Nombre;Cédula;Correo;Fecha de registro;Diap\. 2 · 1\. Contrapunteo/);
+  assert.equal(people[0].split(';').length, 4 + 6);
+  assert.match(people[1], /^"Ana; ""la doc""";111111;ana@x\.co;[^;]+;;;;;;$/);
+  assert.match(people[2], /^Bob Ruiz;222222;bob@x\.co;[^;]+;"B\. Agente estimulante[^"]+";;;;;$/); // quoted: text has ";"
   const totals = resultsCsv(report).replace('﻿', '').trim().split('\r\n');
-  assert.equal(totals.length, 4);
-  assert.match(totals[2], /^2;Caso 1;¿Cómo te sientes\?;B;Regular;1;100,0;1;/);
-});
-
-test('symposium template creates the 7 slides with re-votes as duplicates', async () => {
-  const p = await seedSimposio(admin);
-  assert.deepEqual(
-    p.slides.map((s) => [s.type, s.title || '(portada)']),
-    [
-      ['content', '(portada)'],
-      ['poll', '1. Contrapunteo: Manejo del SMD de bajo riesgo con anemia refractaria · Votación inicial'],
-      ['poll', '1. Contrapunteo: Manejo del SMD de bajo riesgo con anemia refractaria · Revotación'],
-      ['poll', '2. Contrapunteo: SMD de alto riesgo, ¿quién y cuándo va a trasplante alogénico? · Votación inicial'],
-      ['poll', '2. Contrapunteo: SMD de alto riesgo, ¿quién y cuándo va a trasplante alogénico? · Revotación'],
-      ['poll', 'Pregunta 3.1'],
-      ['poll', 'Pregunta 3.2'],
-    ],
-  );
-  assert.equal(p.slides[2].sourceSlideId, p.slides[1].id);
-  assert.equal(p.slides[0].style.backgroundImage, '/media/1.jpg');
-  assert.equal(p.slides[6].style.backgroundImage, '/media/2.jpg');
+  assert.equal(totals.length, 1 + 4 * 5 + 3);
+  assert.equal(SLIDES.length, 7);
 });
