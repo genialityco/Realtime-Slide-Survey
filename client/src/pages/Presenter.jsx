@@ -8,7 +8,8 @@ import {
   listSessions,
   sessionReport,
   setResultsVisible,
-  setShowQr,
+  qrModeOf,
+  setQrMode,
   startSession,
 } from '../data/evento.js';
 import { attendeesCsv, downloadText, resultsCsv } from '../data/export.js';
@@ -90,6 +91,7 @@ function StartSession({ evento, run }) {
 function LiveControls({ state, run, url }) {
   const { evento } = state;
   const { index, slide, poll } = currentSlide(state);
+  const qrMode = qrModeOf(evento);
   const { slides } = state;
   const go = (i) => slides[i] && run(() => goToSlide(db, evento, slides[i].id));
 
@@ -121,11 +123,24 @@ function LiveControls({ state, run, url }) {
               {evento.resultsVisible ? 'Ocultar resultados' : 'Mostrar resultados'}
             </button>
           )}
-          <button onClick={() => run(() => setShowQr(db, !evento.showQr))}>
-            {evento.showQr ? 'Ocultar QR' : 'Mostrar QR'}
-          </button>
+          <div className="segmented" role="group" aria-label="QR en la proyección">
+            {[
+              ['large', 'QR grande'],
+              ['small', 'QR pequeño'],
+              ['hidden', 'Sin QR'],
+            ].map(([mode, label]) => (
+              <button
+                key={mode}
+                className={qrMode === mode ? 'is-active' : ''}
+                aria-pressed={qrMode === mode}
+                onClick={() => run(() => setQrMode(db, mode))}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
-            disabled={!evento.showQr && !evento.resultsVisible}
+            disabled={qrMode === 'hidden' && !evento.resultsVisible}
             title="Quita el QR y los resultados de la proyección: queda solo la diapositiva"
             onClick={() => run(() => hideAll(db, evento))}
           >

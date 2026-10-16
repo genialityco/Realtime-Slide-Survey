@@ -54,7 +54,7 @@ export async function startSession(db, label, current) {
     sessionLabel: String(label || 'Sesión').trim(),
     status: 'live',
     slideId: slides[0].id,
-    showQr: true,
+    qrMode: 'large',
     resultsVisible: false,
     results: null,
     visible: {},
@@ -96,12 +96,18 @@ export function publishResults(db, evento, results) {
   return updateDoc(eventoRef(db), patch);
 }
 
-export const setShowQr = (db, visible) => updateDoc(eventoRef(db), { showQr: !!visible });
+/** QR on the projector: 'large' (big, right half — before starting), 'small' (top-right corner) or 'hidden'. */
+export const QR_MODES = ['large', 'small', 'hidden'];
+
+/** Current QR mode, also for sessions saved with the old boolean `showQr`. */
+export const qrModeOf = (evento) => evento.qrMode ?? (evento.showQr === false ? 'hidden' : 'small');
+
+export const setQrMode = (db, mode) => updateDoc(eventoRef(db), { qrMode: mode });
 
 /** Clears the projection: hides the QR and the current question's results (only the slide remains). */
 export const hideAll = (db, evento) =>
   updateDoc(eventoRef(db), {
-    showQr: false,
+    qrMode: 'hidden',
     resultsVisible: false,
     [`visible.${evento.slideId}`]: false,
     updatedAt: serverTimestamp(),
@@ -110,7 +116,7 @@ export const hideAll = (db, evento) =>
 export async function endSession(db, evento) {
   const batch = writeBatch(db);
   batch.update(sesionRef(db, evento.sessionId), { status: 'ended', endedAt: serverTimestamp() });
-  batch.update(eventoRef(db), { status: 'ended', showQr: false, updatedAt: serverTimestamp() });
+  batch.update(eventoRef(db), { status: 'ended', qrMode: 'hidden', updatedAt: serverTimestamp() });
   await batch.commit();
 }
 

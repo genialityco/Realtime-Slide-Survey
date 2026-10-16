@@ -42,6 +42,11 @@ button:hover:not(:disabled), label.button:hover { border-color: var(--primary); 
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 button.danger { color: var(--danger); }
+.segmented { display: inline-flex; }
+.segmented button { border-radius: 0; margin-left: -1px; }
+.segmented button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+.segmented button:last-child { border-radius: 0 8px 8px 0; }
+.segmented button.is-active { background: var(--primary); border-color: var(--primary); color: #fff; position: relative; }
 button.big { padding: 14px; font-size: 1.05rem; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 8px; }
@@ -214,18 +219,21 @@ button.big { padding: 14px; font-size: 1.05rem; }
 .screen--message { color: #fff; }
 .screen__stage { position: relative; width: min(100vw, calc(100vh * 16 / 9)); }
 .screen__stage .slide { border-radius: 0; box-shadow: none; }
-/* Bottom-right corner: QR card and projector controls (sized relative to the stage width). */
+/* QR card, sized relative to the stage width: 'large' fills the right side, 'small' sits in the top-right corner. */
 .screen__stage { container-type: inline-size; }
 .screen .slide__footer { text-align: left; }
-/* Keep options and the results chart clear of the QR card in the bottom-right corner. */
-.screen__stage--qr .slide__options,
-.screen__stage--qr .chart { margin-right: 16cqw; }
-.screen__corner {
-  position: absolute; right: 1.6cqw; bottom: 1.6cqw;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 0.8cqw;
-}
+/* Keep the slide content clear of the QR card. */
+.screen__stage--qr-large .slide--stage .slide__content { right: 46%; }
+.screen__stage--qr-small .slide--stage .slide__content { right: 26%; }
+.screen__qr { position: absolute; display: flex; }
+.screen__qr--large { top: 0; bottom: 0; right: 3cqw; align-items: center; }
+.screen__qr--large .screen__qr-card { width: 38cqw; padding: 1.6cqw 1.6cqw 1.2cqw; border-radius: 1.4cqw; }
+.screen__qr--large .screen__qr-caption { font-size: 2.4cqw; margin-top: 0.8cqw; }
+.screen__qr--large .screen__qr-url { font-size: 1.5cqw; }
+.screen__qr--small { top: 1.6cqw; right: 1.6cqw; }
+.screen__qr--small .screen__qr-card { width: 21cqw; }
 .screen__qr-card {
-  width: 17cqw; padding: 1cqw 1cqw 0.8cqw; background: #fff; border-radius: 1cqw; text-align: center;
+  padding: 1cqw 1cqw 0.8cqw; background: #fff; border-radius: 1cqw; text-align: center;
   box-shadow: 0 0.4cqw 1.6cqw rgba(0, 0, 0, 0.25); color: #123f47;
 }
 .screen__qr-card .qr { display: block; width: 100%; height: auto; }
