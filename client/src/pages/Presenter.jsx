@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../firebase.js';
-import { endSession, goToSlide, listSessions, sessionReport, setResultsVisible, setShowQr, startSession } from '../data/evento.js';
+import {
+  endSession,
+  goToSlide,
+  hideAll,
+  listSessions,
+  sessionReport,
+  setResultsVisible,
+  setShowQr,
+  startSession,
+} from '../data/evento.js';
 import { attendeesCsv, downloadText, resultsCsv } from '../data/export.js';
 import { SLIDES, TITLE } from '../simposio.js';
 import SlideView from '../components/SlideView.jsx';
@@ -106,7 +115,14 @@ function LiveControls({ state, run, url }) {
             </button>
           )}
           <button onClick={() => run(() => setShowQr(db, !evento.showQr))}>
-            {evento.showQr ? 'Ocultar QR en proyección' : 'Mostrar QR en proyección'}
+            {evento.showQr ? 'Ocultar QR' : 'Mostrar QR'}
+          </button>
+          <button
+            disabled={!evento.showQr && !evento.resultsVisible}
+            title="Quita el QR y los resultados de la proyección: queda solo la diapositiva"
+            onClick={() => run(() => hideAll(db, evento))}
+          >
+            Ocultar todo
           </button>
         </div>
       </section>

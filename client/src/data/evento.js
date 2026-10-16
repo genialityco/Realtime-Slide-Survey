@@ -95,6 +95,15 @@ export function publishResults(db, evento, results) {
 
 export const setShowQr = (db, visible) => updateDoc(eventoRef(db), { showQr: !!visible });
 
+/** Clears the projection: hides the QR and the current question's results (only the slide remains). */
+export const hideAll = (db, evento) =>
+  updateDoc(eventoRef(db), {
+    showQr: false,
+    resultsVisible: false,
+    [`visible.${evento.slideId}`]: false,
+    updatedAt: serverTimestamp(),
+  });
+
 export async function endSession(db, evento) {
   const batch = writeBatch(db);
   batch.update(sesionRef(db, evento.sessionId), { status: 'ended', endedAt: serverTimestamp() });

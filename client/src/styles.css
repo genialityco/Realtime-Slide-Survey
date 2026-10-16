@@ -207,14 +207,6 @@ button.big { padding: 14px; font-size: 1.05rem; }
 .screen__qr-card .qr { display: block; width: 100%; height: auto; }
 .screen__qr-caption { font-weight: 700; font-size: 1.3cqw; margin-top: 0.5cqw; }
 .screen__qr-url { font-size: 0.9cqw; color: #1f7f8c; word-break: break-all; }
-.screen__controls { display: flex; gap: 0.5cqw; }
-.screen__btn {
-  font-size: 0.9cqw; padding: 0.4cqw 0.9cqw; border-radius: 0.5cqw; cursor: pointer;
-  background: rgba(18, 63, 71, 0.85); color: #fff; border: 1px solid rgba(255, 255, 255, 0.4);
-}
-.screen__btn:hover:not(:disabled) { background: #123f47; border-color: #fff; }
-.screen__btn--ghost { opacity: 0; transition: opacity 0.2s; }
-.screen__btn--ghost:hover, .screen__btn--ghost:focus-visible { opacity: 1; }
 
 .report-item { margin: 24px 0; }
 
