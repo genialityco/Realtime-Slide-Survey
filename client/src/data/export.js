@@ -1,4 +1,5 @@
 import { letter } from '../letter.js';
+import { stripRich } from '../rich-text.js';
 
 // Semicolon-separated with a UTF-8 BOM so Excel (es-CO locale) opens it with accents and columns intact.
 const SEP = ';';
@@ -13,7 +14,7 @@ const toCsv = (rows) => BOM + rows.map((r) => r.map(cell).join(SEP)).join('\r\n'
 
 const localTime = (iso) => (iso ? new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : '');
 
-const pollLabel = (p) => `Diap. ${p.slidePosition === null ? '?' : p.slidePosition + 1}${p.title ? ` · ${p.title}` : ''}`;
+const pollLabel = (p) => `Diap. ${p.slidePosition === null ? '?' : p.slidePosition + 1}${p.title ? ` · ${stripRich(p.title)}` : ''}`;
 
 /** One row per poll option with counts and percentages. */
 export function resultsCsv(report) {
@@ -22,10 +23,10 @@ export function resultsCsv(report) {
     p.options.forEach((o, i) => {
       rows.push([
         p.slidePosition === null ? '' : p.slidePosition + 1,
-        p.title,
-        p.question,
+        stripRich(p.title),
+        stripRich(p.question),
         letter(i),
-        o.text,
+        stripRich(o.text),
         o.votes,
         p.total ? ((o.votes / p.total) * 100).toFixed(1).replace('.', ',') : '0',
         p.total,
@@ -47,7 +48,7 @@ export function attendeesCsv(report) {
     ...report.polls.map((p) => {
       const optionId = report.voteOf(p.slideId, a.cedula);
       const i = p.options.findIndex((o) => o.id === optionId);
-      return i < 0 ? '' : `${letter(i)}. ${p.options[i].text}`;
+      return i < 0 ? '' : `${letter(i)}. ${stripRich(p.options[i].text)}`;
     }),
   ]);
   return toCsv([header, ...rows]);

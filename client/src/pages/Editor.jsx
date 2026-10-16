@@ -6,9 +6,10 @@ import { eventoRef } from '../data/evento.js';
 import { restoreDefaults, savePresentacion, subscribePresentacion } from '../data/presentacion.js';
 import { uploadImage } from '../data/imagenes.js';
 import { MAX_OPTIONS, MIN_OPTIONS, normalizeSlides, randomId, validImageUrl } from '../data/model.js';
-import { BACKGROUNDS, CHART_TYPES, IMAGE_POSITIONS, POLL_STYLE } from '../simposio.js';
+import { BACKGROUNDS, CHART_TYPES, IMAGE_POSITIONS, POLL_STYLE, TEXT_ALIGNS } from '../simposio.js';
 import SlideView from '../components/SlideView.jsx';
 import { letter } from '../letter.js';
+import { FORMATS, stripRich, toggleFormat } from '../rich-text.js';
 
 const SAMPLE_VOTES = [14, 9, 5, 3, 2, 2, 1, 1, 1, 1];
 const sampleResults = (slide) => {
@@ -73,7 +74,8 @@ export default function Editor() {
   const slide = slides[index];
   const live = evento?.status === 'live';
 
-  const updateSlide = (patch) => setSlides((all) => all.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  const updateSlideWith = (fn) => setSlides((all) => all.map((s, i) => (i === index ? fn(s) : s)));
+  const updateSlide = (patch) => updateSlideWith((s) => ({ ...s, ...patch }));
   const updateStyle = (patch) => updateSlide({ style: { ...slide.style, ...patch } });
   const move = (from, to) => {
     if (to < 0 || to >= slides.length) return;
@@ -146,7 +148,7 @@ export default function Editor() {
               <span className="slide-thumb__index">{i + 1}</span>
               <div className="slide-thumb__body">
                 <span className="tag">{s.type === 'poll' ? `Encuesta · ${s.options.length} opciones` : 'Contenido'}</span>
-                <div className="slide-thumb__title">{s.title || s.question || '(solo imagen)'}</div>
+                <div className="slide-thumb__title">{stripRich(s.title || s.question) || '(solo imagen)'}</div>
               </div>
               <div className="slide-thumb__actions" onClick={(e) => e.stopPropagation()}>
                 <button title="Subir" disabled={i === 0} onClick={() => move(i, i - 1)}>
@@ -210,6 +212,8 @@ export default function Editor() {
           </div>
 
           <SlideForm
+            key={slide.id}
+            updateSlideWith={updateSlideWith}
             slide={slide}
             imagenes={imagenes}
             setImagenes={setImagenes}
@@ -232,10 +236,40 @@ export default function Editor() {
   );
 }
 
-function SlideForm({ slide, imagenes, setImagenes, updateSlide, updateStyle, applyDesignToAll, setError }) {
+function SlideForm({ slide, imagenes, setImagenes, updateSlide, updateSlideWith, updateStyle, applyDesignToAll, setError }) {
   const style = slide.style;
   const isPoll = slide.type === 'poll';
-  const setOption = (i, text) => updateSlide({ options: slide.options.map((o, j) => (j === i ? { ...o, text } : o)) });
+  const setOption = (i, text) =>
+    updateSlideWith((s) => ({ ...s, options: s.options.map((o, j) => (j === i ? { ...o, text } : o)) }));
+  const setField = (field) => (value) => updateSlideWith((s) => ({ ...s, [field]: value }));
+
+  // Bold / italic / highlight act on the text field that last had the focus (and its selection).
+  const active = useRef(null);
+  const track = (set) => ({ onFocus: (e) => (active.current = { el: e.currentTarget, set }) });
+  const applyFormat = (marker) => {
+    const field = active.current;
+    if (!field) return setError('Haz clic en un texto y selecciona la parte que quieres formatear.');
+    const { el, set } = field;
+    const next = toggleFormat(el.value, el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length, marker);
+    set(next.value);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(next.start, next.end);
+    });
+  };
+  const formatBar = (
+    <div className="format-bar" onMouseDown={(e) => e.target.closest('button') && e.preventDefault()}>
+      <button title="Negrita" onClick={() => applyFormat(FORMATS.bold.marker)}>
+        <b>B</b>
+      </button>
+      <button title="Cursiva" onClick={() => applyFormat(FORMATS.italic.marker)}>
+        <i>I</i>
+      </button>
+      <button title="Resaltado" onClick={() => applyFormat(FORMATS.highlight.marker)}>
+        <mark>Resaltar</mark>
+      </button>
+    </div>
+  );
   const moveOption = (from, to) => {
     if (to < 0 || to >= slide.options.length) return;
     const options = [...slide.options];
@@ -250,6 +284,26 @@ function SlideForm({ slide, imagenes, setImagenes, updateSlide, updateStyle, app
     <div className="editor-form">
       <fieldset className="card">
         <legend>Contenido</legend>
+        <div className="row format-row">
+          {formatBar}
+          <span className="spacer" />
+          <div className="format-bar" role="group" aria-label="Alineación del texto">
+            {TEXT_ALIGNS.map((a) => (
+              <button
+                key={a.id}
+                title={a.label}
+                className={(style.textAlign || 'left') === a.id ? 'primary' : ''}
+                onClick={() => updateStyle({ textAlign: a.id })}
+              >
+                <AlignIcon align={a.id} />
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="muted small">
+          Selecciona un texto y pulsa <b>B</b>, <i>I</i> o <mark>Resaltar</mark> (pulsa otra vez para quitarlo). La
+          alineación aplica a toda la diapositiva.
+        </p>
         <label>
           Tipo
           <select
@@ -269,27 +323,37 @@ function SlideForm({ slide, imagenes, setImagenes, updateSlide, updateStyle, app
         </label>
         <label>
           Título superior (opcional)
-          <input value={slide.title} onChange={(e) => updateSlide({ title: e.target.value })} />
+          <input value={slide.title} onChange={(e) => setField('title')(e.target.value)} {...track(setField('title'))} />
         </label>
         <label>
           {isPoll ? 'Caso clínico / texto (opcional)' : 'Texto'}
-          <textarea rows={4} value={slide.body} onChange={(e) => updateSlide({ body: e.target.value })} />
+          <textarea
+            rows={4}
+            value={slide.body}
+            onChange={(e) => setField('body')(e.target.value)}
+            {...track(setField('body'))}
+          />
         </label>
         <label>
           {isPoll ? 'Pregunta' : 'Título principal'}
-          <input value={slide.question} onChange={(e) => updateSlide({ question: e.target.value })} />
+          <input
+            value={slide.question}
+            onChange={(e) => setField('question')(e.target.value)}
+            {...track(setField('question'))}
+          />
         </label>
       </fieldset>
 
       {isPoll && (
         <fieldset className="card">
           <legend>Opciones de respuesta</legend>
+          {formatBar}
           {slide.options.map((o, i) => (
             <div className="row option-row" key={o.id}>
               <span className="letter" style={{ '--accent': style.accent }}>
                 {letter(i)}
               </span>
-              <input value={o.text} onChange={(e) => setOption(i, e.target.value)} />
+              <input value={o.text} onChange={(e) => setOption(i, e.target.value)} {...track((v) => setOption(i, v))} />
               <button title="Subir" disabled={i === 0} onClick={() => moveOption(i, i - 1)}>
                 ↑
               </button>
@@ -523,5 +587,18 @@ function UrlInput({ onSubmit, setError }) {
       <input placeholder="o pega una URL https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
       <button disabled={!url}>Usar</button>
     </form>
+  );
+}
+
+/** Four-line alignment icon (left / center / right / justify). */
+function AlignIcon({ align }) {
+  const widths = align === 'justify' ? [14, 14, 14, 14] : [14, 9, 14, 9];
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true">
+      {widths.map((w, i) => {
+        const x = align === 'center' ? (16 - w) / 2 : align === 'right' ? 16 - w - 1 : 1;
+        return <rect key={i} x={x} y={1 + i * 3.3} width={w} height="1.8" rx="0.9" fill="currentColor" />;
+      })}
+    </svg>
   );
 }

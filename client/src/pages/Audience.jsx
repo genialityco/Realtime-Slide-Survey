@@ -7,6 +7,7 @@ import { registrationCache } from '../local.js';
 import { BACKGROUNDS, TITLE } from '../simposio.js';
 import SlideView from '../components/SlideView.jsx';
 import { letter } from '../letter.js';
+import { Rich } from '../rich.jsx';
 
 /** Anonymous Firebase user (invisible to the person); it persists on the phone, so it identifies the device. */
 function useAnonymousUser() {
@@ -207,7 +208,7 @@ function Live({ uid, registration }) {
   const yourAnswer =
     myIndex >= 0 ? (
       <p className="voted">
-        ✓ Tu respuesta: <b>{letter(myIndex)}.</b> {slide.options[myIndex].text}
+        ✓ Tu respuesta: <b>{letter(myIndex)}.</b> <Rich text={slide.options[myIndex].text} />
       </p>
     ) : null;
   const buttons = (
@@ -215,7 +216,9 @@ function Live({ uid, registration }) {
       {slide.options.map((o, i) => (
         <button key={o.id} disabled={sending || !state.myVoteLoaded} onClick={() => choose(o.id)}>
           <span className="letter">{letter(i)}</span>
-          <span>{o.text}</span>
+          <span>
+            <Rich text={o.text} />
+          </span>
         </button>
       ))}
     </div>

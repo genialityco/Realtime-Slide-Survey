@@ -36,7 +36,15 @@ export const POLL_STYLE = {
   overlay: 0,
   contentTop: 19,
   textScale: 1,
+  textAlign: 'left',
 };
+
+export const TEXT_ALIGNS = [
+  { id: 'left', label: 'Izquierda', icon: '⯇' },
+  { id: 'center', label: 'Centrado', icon: '≡' },
+  { id: 'right', label: 'Derecha', icon: '⯈' },
+  { id: 'justify', label: 'Justificado', icon: '☰' },
+];
 const COVER_STYLE = { ...POLL_STYLE, background: '#123f47', backgroundImage: '/media/1.jpg', contentTop: 0 };
 
 const opts = (...texts) => texts.map((text, i) => ({ id: String.fromCharCode(65 + i), text }));

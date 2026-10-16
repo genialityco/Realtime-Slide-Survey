@@ -18,6 +18,7 @@ import SlideView from '../components/SlideView.jsx';
 import QrCode from '../components/QrCode.jsx';
 import { useAdmin } from '../components/AdminGate.jsx';
 import { plural } from '../letter.js';
+import { stripRich } from '../rich-text.js';
 import { formatDate, joinUrl } from '../local.js';
 import { currentSlide, useEvento, usePublishResults, useSlideKeys } from '../useAdminSession.js';
 
@@ -151,7 +152,7 @@ function LiveControls({ state, run, url }) {
               <div className="slide-thumb__body">
                 <span className="tag">{s.type === 'poll' ? 'Encuesta' : 'Contenido'}</span>
                 {p?.resultsVisible && <span className="tag tag--copy">Resultados visibles</span>}
-                <div className="slide-thumb__title">{s.title || s.question || '(solo imagen)'}</div>
+                <div className="slide-thumb__title">{stripRich(s.title || s.question) || '(solo imagen)'}</div>
                 {p && <small className="muted">{plural(p.total, 'voto')}</small>}
               </div>
             </button>

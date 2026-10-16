@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import PollChart from './PollChart.jsx';
 import { letter } from '../letter.js';
+import { Rich } from '../rich.jsx';
 
 /**
  * Renders a slide with its own visual config.
@@ -26,7 +27,7 @@ export default function SlideView({ slide, results, renderOptions, variant = 'st
   return (
     <div
       ref={rootRef}
-      className={`slide slide--${variant} ${hasContent ? '' : 'slide--image-only'}`}
+      className={`slide slide--${variant} slide--align-${style.textAlign || 'left'} ${hasContent ? '' : 'slide--image-only'}`}
       style={{
         backgroundColor: style.background,
         backgroundImage: banner ? undefined : image,
@@ -46,9 +47,21 @@ export default function SlideView({ slide, results, renderOptions, variant = 'st
             {picture && <img className="slide__picture" src={picture.url} alt="" />}
             {hasText && (
               <div className="slide__text">
-                {slide.title && <div className="slide__kicker">{slide.title}</div>}
-                {showBody && <p className="slide__body">{slide.body}</p>}
-                {slide.question && <h2 className="slide__question">{slide.question}</h2>}
+                {slide.title && (
+                  <div className="slide__kicker">
+                    <Rich text={slide.title} />
+                  </div>
+                )}
+                {showBody && (
+                  <p className="slide__body">
+                    <Rich text={slide.body} />
+                  </p>
+                )}
+                {slide.question && (
+                  <h2 className="slide__question">
+                    <Rich text={slide.question} />
+                  </h2>
+                )}
                 {slide.type === 'poll' &&
                   (results ? (
                     <PollChart results={results} chartType={style.chartType} />
@@ -59,7 +72,9 @@ export default function SlideView({ slide, results, renderOptions, variant = 'st
                       {slide.options.map((o, i) => (
                         <li key={o.id ?? i}>
                           <span className="letter">{letter(i)}</span>
-                          <span>{o.text}</span>
+                          <span>
+                            <Rich text={o.text} />
+                          </span>
                         </li>
                       ))}
                     </ol>

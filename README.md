@@ -7,6 +7,8 @@ está en [client/src/simposio.js](client/src/simposio.js) y se usa la primera ve
 ### Editor (/admin/editor)
 
 - Textos: título superior, caso/texto, pregunta. Opciones: 2 a 10, agregar, quitar, reordenar.
+- Formato: **negrita**, *cursiva* y ==resaltado== (botones B / I / Resaltar sobre el texto seleccionado; se guardan
+  con esas marcas) y alineación izquierda, centrado, derecha o justificado por diapositiva.
 - Diapositivas: agregar (encuesta o contenido), duplicar, eliminar, reordenar.
 - Diseño: fondo (plantillas 1.jpg / 2.jpg, subir imagen, sin imagen), colores, tamaño del texto,
   espacio superior, oscurecer; «Aplicar este diseño a todas».

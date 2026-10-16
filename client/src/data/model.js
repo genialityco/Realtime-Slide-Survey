@@ -14,6 +14,7 @@ export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 10;
 const CHARTS = ['bar', 'column', 'pie', 'donut'];
 const POSITIONS = ['right', 'left', 'top', 'bottom'];
+const ALIGNS = ['left', 'center', 'right', 'justify'];
 const clamp = (value, min, max, fallback) => {
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
@@ -38,6 +39,7 @@ function slideStyle(style = {}) {
     overlay: clamp(style.overlay, 0, 0.85, 0),
     contentTop: clamp(style.contentTop, 0, 50, 0),
     textScale: clamp(style.textScale, 0.6, 1.6, 1),
+    textAlign: ALIGNS.includes(style.textAlign) ? style.textAlign : 'left',
   };
 }
 

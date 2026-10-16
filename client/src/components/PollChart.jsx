@@ -1,4 +1,5 @@
 import { letter, plural } from '../letter.js';
+import { Rich } from '../rich.jsx';
 
 // Slice colours for pie/donut charts (the first one is the slide's accent colour).
 const PALETTE = ['var(--accent)', '#123f47', '#f59e0b', '#e11d48', '#7c3aed', '#16a34a', '#0ea5e9', '#f97316', '#64748b', '#a16207'];
@@ -16,7 +17,9 @@ export default function PollChart({ results, chartType = 'bar' }) {
         <div key={o.id} className="chart__row">
           <span className="chart__label">
             <span className="letter">{letter(i)}</span>
-            <span>{o.text}</span>
+            <span>
+              <Rich text={o.text} />
+            </span>
           </span>
           <span className="chart__track">
             <span
@@ -83,7 +86,9 @@ function RoundChart({ results, donut }) {
             <span className="letter" style={{ background: color }}>
               {letter(i)}
             </span>
-            <span className="chart__legend-text">{o.text}</span>
+            <span className="chart__legend-text">
+              <Rich text={o.text} />
+            </span>
             <span className="chart__value">
               <b>{pct(o.votes, total)}%</b> <small>({o.votes})</small>
             </span>

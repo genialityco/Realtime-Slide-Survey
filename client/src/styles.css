@@ -272,3 +272,17 @@ button.big { padding: 14px; font-size: 1.05rem; }
 .is-busy { opacity: 0.6; pointer-events: none; }
 .small-btn { font-size: 0.85rem; }
 .slide-list a.button, a.button { text-decoration: none; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--fg); }
+
+/* Text alignment (per slide) and inline formatting */
+.slide--align-center .slide__text { text-align: center; }
+.slide--align-right .slide__text { text-align: right; }
+.slide--align-justify .slide__text { text-align: justify; }
+.slide--align-center .slide__options { align-items: center; }
+.slide--align-right .slide__options { align-items: flex-end; }
+.slide--align-right .slide__options li { flex-direction: row-reverse; }
+.slide--align-justify .slide__options li > span:last-child { text-align: justify; }
+mark { background: #fde047; color: #1f2a30; padding: 0 0.15em; border-radius: 3px; }
+.format-row { gap: 12px; }
+.format-bar { display: inline-flex; gap: 4px; }
+.format-bar button { padding: 4px 10px; min-width: 36px; display: inline-grid; place-items: center; }
+.format-bar mark { padding: 0 4px; }
