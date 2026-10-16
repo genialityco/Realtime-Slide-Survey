@@ -1,7 +1,8 @@
 // Audience side: one-time registration per phone, following the projected slide, voting.
 import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { ROOT, slideById } from '../simposio.js';
+import { ROOT, findSlide } from '../simposio.js';
 import { AppError, normalizeAttendee, withOptions } from './model.js';
+import { getPresentacion, presentacionRef, subscribePresentacion } from './presentacion.js';
 
 const asistenteRef = (db, cedula) => doc(db, ROOT, 'evento', 'asistentes', cedula);
 const dispositivoRef = (db, uid) => doc(db, ROOT, 'evento', 'dispositivos', uid);
@@ -52,22 +53,24 @@ export async function register(db, uid, form) {
 }
 
 /**
- * Follows the projected slide. Listens to `evento` (one document carries the slide, its visibility and
- * published results) plus this person's vote on the current poll.
+ * Follows the projected slide. Listens to `evento` (current slide, its visibility and published results),
+ * `presentacion` (slide contents, so edits show up live) and this person's vote on the current poll.
  * onChange({ status, sessionId, slide, resultsVisible, results, myVote, myVoteLoaded })
  */
 export function subscribe(db, cedula, onChange, onError = console.error) {
   let evento = null;
+  let slides = null;
   let myVote = null;
   let myVoteLoaded = false;
   let voteKey = null;
   let voteUnsub = null;
 
   const emit = () => {
-    if (!evento) return;
-    const slide = evento.status === 'live' ? slideById(evento.slideId) : null;
+    if (!evento || !slides) return;
+    const slide = evento.status === 'live' ? findSlide(slides, evento.slideId) : null;
     const isPoll = slide?.type === 'poll';
     onChange({
+      cover: slides[0] ?? null,
       status: evento.status ?? 'idle',
       sessionId: evento.sessionId ?? null,
       slide,
@@ -102,15 +105,29 @@ export function subscribe(db, cedula, onChange, onError = console.error) {
     doc(db, ROOT, 'evento'),
     (s) => {
       evento = s.exists() ? s.data() : { status: 'idle' };
-      const slide = evento.status === 'live' ? slideById(evento.slideId) : null;
-      followVote(evento.sessionId, slide?.type === 'poll' ? slide.id : null);
-      emit();
+      sync();
+    },
+    onError,
+  );
+  const unsubSlides = subscribePresentacion(
+    db,
+    (p) => {
+      slides = p.slides;
+      sync();
     },
     onError,
   );
 
+  function sync() {
+    if (!evento || !slides) return;
+    const slide = evento.status === 'live' ? findSlide(slides, evento.slideId) : null;
+    followVote(evento.sessionId, slide?.type === 'poll' ? slide.id : null);
+    emit();
+  }
+
   return () => {
     unsubEvento();
+    unsubSlides();
     voteUnsub?.();
   };
 }
@@ -123,13 +140,15 @@ export async function vote(db, uid, sid, slideId, cedula, opcion) {
   const closed = 'No se registró el voto: la pregunta ya se cerró.';
   try {
     await runTransaction(db, async (tx) => {
-      const [evento, existing] = await Promise.all([
+      const [evento, existing, presentacion] = await Promise.all([
         tx.get(doc(db, ROOT, 'evento')),
         tx.get(votoRef(db, sid, slideId, cedula)),
+        tx.get(presentacionRef(db)),
       ]);
       const e = evento.data();
       if (!e || e.status !== 'live' || e.sessionId !== sid || e.slideId !== slideId) throw new AppError(closed);
-      if (!slideById(slideId)?.options?.some((o) => o.id === opcion)) throw new AppError('Opción no válida.');
+      const slides = presentacion.data()?.slides ?? (await getPresentacion(db)).slides;
+      if (!findSlide(slides, slideId)?.options?.some((o) => o.id === opcion)) throw new AppError('Opción no válida.');
       if (existing.exists()) throw new AppError('Ya habías votado en esta pregunta.');
       tx.set(votoRef(db, sid, slideId, cedula), { slideId, cedula, opcion, uid, createdAt: serverTimestamp() });
     });

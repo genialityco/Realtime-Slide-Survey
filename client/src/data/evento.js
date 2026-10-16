@@ -11,8 +11,9 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { POLLS, ROOT, SLIDES, slideById } from '../simposio.js';
+import { ROOT } from '../simposio.js';
 import { publicResults, randomId, tally } from './model.js';
+import { getPresentacion, presentacionRef } from './presentacion.js';
 
 export const eventoRef = (db) => doc(db, ROOT, 'evento');
 const adminsRef = (db) => doc(db, ROOT, 'admins');
@@ -35,6 +36,7 @@ export async function isAdmin(db, uid) {
  * A live session, if any, is ended first.
  */
 export async function startSession(db, label, current) {
+  const { slides } = await getPresentacion(db);
   const sid = `${new Date().toISOString().slice(0, 10)}-${randomId(6)}`;
   const batch = writeBatch(db);
   if (current?.status === 'live' && current.sessionId) {
@@ -45,12 +47,13 @@ export async function startSession(db, label, current) {
     status: 'live',
     startedAt: serverTimestamp(),
     endedAt: null,
+    slides, // snapshot: saved results always show the questions as asked
   });
   batch.set(eventoRef(db), {
     sessionId: sid,
     sessionLabel: String(label || 'Sesión').trim(),
     status: 'live',
-    slideId: SLIDES[0].id,
+    slideId: slides[0].id,
     showQr: true,
     resultsVisible: false,
     results: null,
@@ -131,27 +134,28 @@ const pollMeta = (poll) => ({ title: poll.title, body: poll.body, question: poll
  */
 export function subscribeAdmin(db, onChange, onError = console.error) {
   let evento = null;
+  let slides = null;
   let votes = [];
   let attendeeCount = 0;
   let votesSid = null;
   let votesUnsub = null;
 
   const emit = () => {
-    if (!evento) return;
+    if (!evento || !slides) return;
     const sid = evento.sessionId;
-    const polls = POLLS.map((p) => ({
+    const polls = slides.filter((s) => s.type === 'poll').map((p) => ({
       ...tally(sid, p, votes.filter((v) => v.slideId === p.id)),
       ...pollMeta(p),
       resultsVisible: !!evento.visible?.[p.id],
       published: evento.published?.[p.id] ?? null,
     }));
-    onChange({ evento, polls, attendeeCount });
+    onChange({ evento, slides, polls, attendeeCount });
   };
 
   const unsubEvento = onSnapshot(
     eventoRef(db),
     (snap) => {
-      evento = snap.exists() ? snap.data() : { status: 'idle', sessionId: null, slideId: SLIDES[0].id };
+      evento = snap.exists() ? snap.data() : { status: 'idle', sessionId: null, slideId: null };
       if (evento.sessionId !== votesSid) {
         votesUnsub?.();
         votes = [];
@@ -172,6 +176,16 @@ export function subscribeAdmin(db, onChange, onError = console.error) {
     onError,
   );
 
+  const unsubPresentacion = onSnapshot(
+    presentacionRef(db),
+    (snap) => {
+      slides = snap.exists() && snap.data().slides?.length ? snap.data().slides : null;
+      if (!slides) getPresentacion(db).then((p) => ((slides = p.slides), emit()), onError);
+      emit();
+    },
+    onError,
+  );
+
   const unsubAsistentes = onSnapshot(
     asistentesCol(db),
     (s) => {
@@ -183,6 +197,7 @@ export function subscribeAdmin(db, onChange, onError = console.error) {
 
   return () => {
     unsubEvento();
+    unsubPresentacion();
     unsubAsistentes();
     votesUnsub?.();
   };
@@ -190,18 +205,23 @@ export function subscribeAdmin(db, onChange, onError = console.error) {
 
 /** Persisted results of one session, the registered attendees and each one's answers. */
 export async function sessionReport(db, sid) {
-  const [sesion, votosSnap, asistentesSnap] = await Promise.all([
+  const [sesion, votosSnap, asistentesSnap, presentacion] = await Promise.all([
     getDoc(sesionRef(db, sid)),
     getDocs(votosCol(db, sid)),
     getDocs(asistentesCol(db)),
+    getPresentacion(db),
   ]);
+  const slides = sesion.data()?.slides ?? presentacion.slides; // as asked in that session
   const votes = votosSnap.docs.map((d) => d.data());
   const voteOf = new Map(votes.map((v) => [`${v.slideId}:${v.cedula}`, v.opcion]));
-  const polls = POLLS.map((p) => ({
-    ...tally(sid, p, votes.filter((v) => v.slideId === p.id)),
-    ...pollMeta(p),
-    slidePosition: SLIDES.indexOf(slideById(p.id)),
-  }));
+  const polls = slides
+    .map((p, position) => ({ p, position }))
+    .filter(({ p }) => p.type === 'poll')
+    .map(({ p, position }) => ({
+      ...tally(sid, p, votes.filter((v) => v.slideId === p.id)),
+      ...pollMeta(p),
+      slidePosition: position,
+    }));
   const attendees = asistentesSnap.docs
     .map((d) => d.data())
     .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
@@ -211,8 +231,9 @@ export async function sessionReport(db, sid) {
       email: a.correo,
       registeredAt: a.createdAt?.toDate?.().toISOString() ?? null,
     }));
+  const { slides: _snapshot, ...session } = sesion.data() ?? {};
   return {
-    session: { id: sid, ...(sesion.data() ?? {}) },
+    session: { id: sid, ...session },
     attendees,
     attendeeCount: attendees.length,
     polls,

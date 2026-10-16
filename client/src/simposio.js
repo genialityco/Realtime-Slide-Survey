@@ -1,12 +1,33 @@
-// The symposium: fixed slides and the Firestore namespace everything lives under.
+// The symposium: Firestore namespace, editor choices and the initial slides.
+// The live slides are stored in simposio_leucemias_2026/presentacion and edited from /admin/editor;
+// DEFAULT_SLIDES only seeds that document the first time.
 
-/** Root collection, exclusive to this event. Holds two documents: `evento` and `admins`. */
+/** Root collection, exclusive to this event (Firestore documents and the Storage folder). */
 export const ROOT = 'simposio_leucemias_2026';
 
 export const TITLE = 'Simposio de Leucemias Agudas y Crónicas';
 
+export const BACKGROUNDS = [
+  { url: '/media/1.jpg', label: 'Portada del simposio', contentTop: 0 },
+  { url: '/media/2.jpg', label: 'Fondo con cabecera', contentTop: 19 },
+];
+
+export const CHART_TYPES = [
+  { id: 'bar', label: 'Barras horizontales' },
+  { id: 'column', label: 'Barras verticales' },
+  { id: 'pie', label: 'Circular' },
+  { id: 'donut', label: 'Dona' },
+];
+
+export const IMAGE_POSITIONS = [
+  { id: 'right', label: 'Derecha' },
+  { id: 'left', label: 'Izquierda' },
+  { id: 'top', label: 'Arriba' },
+  { id: 'bottom', label: 'Abajo' },
+];
+
 // Colours sampled from 2.jpg: dark teal headings, light teal accents.
-const pollStyle = {
+export const POLL_STYLE = {
   background: '#ffffff',
   textColor: '#123f47',
   accent: '#2aa3b3',
@@ -14,8 +35,9 @@ const pollStyle = {
   backgroundImage: '/media/2.jpg',
   overlay: 0,
   contentTop: 19,
+  textScale: 1,
 };
-const coverStyle = { ...pollStyle, background: '#123f47', backgroundImage: '/media/1.jpg', contentTop: 0 };
+const COVER_STYLE = { ...POLL_STYLE, background: '#123f47', backgroundImage: '/media/1.jpg', contentTop: 0 };
 
 const opts = (...texts) => texts.map((text, i) => ({ id: String.fromCharCode(65 + i), text }));
 
@@ -49,15 +71,15 @@ const caso2 = {
 };
 
 /**
- * Slide ids are stable: votes are stored per (sessionId, slideId), so the initial vote and the re-vote of a
- * case are independent polls with the same content. Keep ids and option letters in sync with firestore.rules.
+ * Initial slides. Votes are stored per (sessionId, slideId), so the initial vote and the re-vote of a case
+ * are independent polls with the same content.
  */
-export const SLIDES = [
-  { id: 'portada', type: 'content', title: '', question: '', body: '', style: coverStyle },
-  { id: 'p1-inicial', type: 'poll', ...caso1, title: `${caso1.title} · Votación inicial`, style: pollStyle },
-  { id: 'p1-revotacion', type: 'poll', ...caso1, title: `${caso1.title} · Revotación`, style: pollStyle },
-  { id: 'p2-inicial', type: 'poll', ...caso2, title: `${caso2.title} · Votación inicial`, style: pollStyle },
-  { id: 'p2-revotacion', type: 'poll', ...caso2, title: `${caso2.title} · Revotación`, style: pollStyle },
+export const DEFAULT_SLIDES = [
+  { id: 'portada', type: 'content', title: '', question: '', body: '', options: [], style: COVER_STYLE, image: null },
+  { id: 'p1-inicial', type: 'poll', ...caso1, title: `${caso1.title} · Votación inicial`, style: POLL_STYLE, image: null },
+  { id: 'p1-revotacion', type: 'poll', ...caso1, title: `${caso1.title} · Revotación`, style: POLL_STYLE, image: null },
+  { id: 'p2-inicial', type: 'poll', ...caso2, title: `${caso2.title} · Votación inicial`, style: POLL_STYLE, image: null },
+  { id: 'p2-revotacion', type: 'poll', ...caso2, title: `${caso2.title} · Revotación`, style: POLL_STYLE, image: null },
   {
     id: 'p3-1',
     type: 'poll',
@@ -67,7 +89,8 @@ export const SLIDES = [
       '¿Está usted de acuerdo en participar en el grupo colombiano mielodisplasia de ACHO, ' +
       'entendiendo que su compromiso sería con las actividades del grupo?',
     options: opts('Sí.', 'No.', 'Me gustaría recibir más información.'),
-    style: pollStyle,
+    style: POLL_STYLE,
+    image: null,
   },
   {
     id: 'p3-2',
@@ -76,10 +99,10 @@ export const SLIDES = [
     body: '',
     question: '¿Considera usted que en Colombia los pacientes con mielodisplasia tienen infradiagnóstico?',
     options: opts('Sí, de manera importante.', 'Sí, en grado moderado.', 'No.', 'No tengo una opinión formada.'),
-    style: pollStyle,
+    style: POLL_STYLE,
+    image: null,
   },
 ];
 
-export const POLLS = SLIDES.filter((s) => s.type === 'poll');
-export const slideById = (id) => SLIDES.find((s) => s.id === id) ?? null;
-export const slideIndex = (id) => SLIDES.findIndex((s) => s.id === id);
+export const findSlide = (slides, id) => slides?.find((s) => s.id === id) ?? null;
+export const findIndex = (slides, id) => (slides ?? []).findIndex((s) => s.id === id);

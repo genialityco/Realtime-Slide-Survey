@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { db } from './firebase.js';
 import { goToSlide, publishResults, subscribeAdmin } from './data/evento.js';
-import { SLIDES, slideIndex } from './simposio.js';
+import { findIndex } from './simposio.js';
 
 /** Live admin view of the event (Firestore listeners), plus `run(fn)` that reports errors. */
 export function useEvento() {
@@ -21,8 +21,8 @@ export function useEvento() {
 
 /** Current slide, its index and (for polls) the live tally. */
 export function currentSlide(state) {
-  const index = Math.max(0, slideIndex(state.evento.slideId));
-  const slide = SLIDES[index];
+  const index = Math.max(0, findIndex(state.slides, state.evento.slideId));
+  const slide = state.slides[index];
   const poll = state.polls.find((p) => p.slideId === slide.id) ?? null;
   return { index, slide, poll };
 }
@@ -58,7 +58,7 @@ export function useSlideKeys(state, run) {
   useEffect(() => {
     if (!state || state.evento.status !== 'live') return;
     const { index } = currentSlide(state);
-    const go = (i) => SLIDES[i] && run(() => goToSlide(db, state.evento, SLIDES[i].id));
+    const go = (i) => state.slides[i] && run(() => goToSlide(db, state.evento, state.slides[i].id));
     const onKey = (e) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) (e.preventDefault(), go(index + 1));

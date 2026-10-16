@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth, db } from '../firebase.js';
 import { myRegistration, register, subscribe, vote } from '../data/publico.js';
+import { getPresentacion } from '../data/presentacion.js';
 import { registrationCache } from '../local.js';
-import { SLIDES, TITLE } from '../simposio.js';
+import { BACKGROUNDS, TITLE } from '../simposio.js';
 import SlideView from '../components/SlideView.jsx';
 import { letter } from '../letter.js';
 
@@ -66,6 +67,10 @@ export default function Audience() {
 }
 
 function Registration({ uid, onDone }) {
+  const [cover, setCover] = useState(null);
+  useEffect(() => {
+    getPresentacion(db).then((p) => setCover(p.slides[0]?.style?.backgroundImage || BACKGROUNDS[0].url)).catch(() => setCover(BACKGROUNDS[0].url));
+  }, []);
   const [form, setForm] = useState({ nombre: '', cedula: '', correo: '', consentimiento: false });
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -85,7 +90,7 @@ function Registration({ uid, onDone }) {
 
   return (
     <main className="page page--narrow audience">
-      <img className="audience__banner" src={SLIDES[0].style.backgroundImage} alt={TITLE} />
+      {cover && <img className="audience__banner" src={cover} alt={TITLE} />}
       <h2>Encuesta en vivo</h2>
       <p className="muted">Regístrate una sola vez para participar en las votaciones del simposio.</p>
       <form className="card form" onSubmit={submit}>
@@ -180,10 +185,15 @@ function Live({ uid, registration }) {
 
   const { slide } = state;
   if (!slide || slide.type !== 'poll') {
+    const shown = slide ?? state.cover;
     return (
-      <main className="page page--narrow audience">
+      <main className="page page--narrow audience" key={shown?.id ?? 'none'}>
         {header}
-        <img className="audience__banner" src={SLIDES[0].style.backgroundImage} alt={TITLE} />
+        {shown && (
+          <div className="fade-in">
+            <SlideView variant="mobile" slide={shown} />
+          </div>
+        )}
         <p className="waiting">
           {state.status === 'ended'
             ? '¡Gracias por participar!'

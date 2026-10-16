@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import { collection, deleteDoc, doc, getDoc, getDocs, serverTimestamp, setDoc, setLogLevel, updateDoc } from 'firebase/firestore';
 
-import { ROOT, SLIDES } from '../client/src/simposio.js';
+import { DEFAULT_SLIDES, ROOT } from '../client/src/simposio.js';
+import { ensurePresentacion, getPresentacion, presentacionRef, savePresentacion, subscribePresentacion } from '../client/src/data/presentacion.js';
 import {
   endSession,
   eventoRef,
@@ -28,7 +29,11 @@ before(async () => {
   setLogLevel('silent'); // expected PERMISSION_DENIED writes would otherwise flood the output
   env = await initializeTestEnvironment({
     projectId: 'demo-rss',
-    firestore: { rules: readFileSync('firestore.simposio-protegido.rules', 'utf8'), host: '127.0.0.1', port: 8080 },
+    firestore: {
+      rules: readFileSync('firestore.simposio-protegido.rules', 'utf8'),
+      host: '127.0.0.1',
+      port: Number(process.env.FIRESTORE_EMULATOR_HOST?.split(':')[1]) || 8080, // set by emulators:exec
+    },
   });
 });
 
@@ -38,6 +43,7 @@ beforeEach(async () => {
   await env.clearFirestore();
   await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), ROOT, 'admins'), { uids: ['admin-1'] }));
   admin = env.authenticatedContext('admin-1', { email: 'admin@x.co' }).firestore();
+  await ensurePresentacion(admin);
   stranger = env.authenticatedContext('stranger').firestore();
   nobody = env.unauthenticatedContext().firestore();
 });
@@ -285,7 +291,7 @@ test('CSV exports: totals per question and each attendee answers', async () => {
   assert.match(people[2], /^Bob Ruiz;222222;bob@x\.co;[^;]+;"B\. Agente estimulante[^"]+";;;;;$/); // quoted: text has ";"
   const totals = resultsCsv(report).replace('﻿', '').trim().split('\r\n');
   assert.equal(totals.length, 1 + 4 * 5 + 3);
-  assert.equal(SLIDES.length, 7);
+  assert.equal(DEFAULT_SLIDES.length, 7);
 });
 
 // ── Production today: the project's rules are open, the app enforces its own checks ──
@@ -314,4 +320,88 @@ test('with open rules (as deployed), the app still votes once and only on the pr
     assert.deepEqual(counts('p1-inicial'), [0, 1, 0, 0]);
     assert.deepEqual(counts('p1-revotacion'), [0, 0, 1, 0]);
   });
+});
+
+// ── Editor ─────────────────────────────────────────────────────────────────
+
+test('only admins can edit the presentation; everyone can read it', async () => {
+  const { slides } = await getPresentacion(nobody);
+  assert.equal(slides.length, 7);
+  await assertFails(setDoc(presentacionRef(stranger), { slides: [] }));
+  await assertFails(setDoc(presentacionRef(nobody), { slides: [] }));
+  await assert.rejects(savePresentacion(admin, []), /al menos una diapositiva/);
+  const bad = structuredClone(slides);
+  bad[1].options = [{ id: 'A', text: 'Solo una' }];
+  await assert.rejects(savePresentacion(admin, bad), /al menos 2 opciones/);
+  bad[1].options = Array.from({ length: 11 }, (_, i) => ({ text: `O${i}` }));
+  await assert.rejects(savePresentacion(admin, bad), /más de 10/);
+});
+
+test('edits (texts, options, chart, image, new slides) reach phones live and votes follow them', async () => {
+  const sid = await startSession(admin, 'Día 1');
+  const ana = phone('ana');
+  await ana.register('111111');
+  const follow = (cb) => subscribe(ana.db, '111111', cb);
+
+  const { slides } = await getPresentacion(admin);
+  const edited = structuredClone(slides);
+  edited[1].question = '¿Pregunta editada?';
+  edited[1].options.push({ text: 'Opción nueva E' }); // new option gets an id on save
+  edited[1].style.chartType = 'donut';
+  edited[1].style.textScale = 1.3;
+  edited[1].image = { url: '/media/1.jpg', position: 'left', size: 30 };
+  edited.splice(2, 0, { type: 'poll', question: 'Diapositiva nueva', options: [{ text: 'Sí' }, { text: 'No' }], style: {} });
+  const clean = await savePresentacion(admin, edited, { evento: await evento() });
+  assert.equal(clean.length, 8);
+  const newOption = clean[1].options[4];
+  assert.ok(newOption.id && newOption.text === 'Opción nueva E');
+  assert.equal(clean[1].options[0].id, 'A'); // existing ids are kept
+  assert.equal(clean[1].style.chartType, 'donut');
+  assert.deepEqual(clean[1].image, { url: '/media/1.jpg', position: 'left', size: 30 });
+  assert.equal(clean[2].style.chartType, 'bar'); // defaults filled in
+
+  const onQ = waitFor(follow, (s) => s.slide?.question === '¿Pregunta editada?' && s.myVoteLoaded);
+  await go('p1-inicial');
+  const q = await onQ;
+  assert.equal(q.slide.options.length, 5);
+  await ana.vote(sid, 'p1-inicial', '111111', newOption.id); // the new option can be voted (rules check optionIds)
+
+  // A brand-new slide is navigable and votable too.
+  await go(clean[2].id);
+  await ana.vote(sid, clean[2].id, '111111', clean[2].options[1].id);
+
+  // Editing while the phone looks at a slide updates it in place.
+  const renamed = structuredClone(clean);
+  renamed[2].question = 'Diapositiva nueva (corregida)';
+  const live = waitFor(follow, (s) => s.slide?.question === 'Diapositiva nueva (corregida)');
+  await savePresentacion(admin, renamed, { evento: await evento() });
+  await live;
+
+  const report = await sessionReport(admin, sid);
+  const p1 = report.polls.find((p) => p.slideId === 'p1-inicial');
+  assert.deepEqual(p1.options.map((o) => o.votes), [0, 0, 0, 0, 1]);
+  assert.equal(report.polls.find((p) => p.slideId === clean[2].id).question, 'Diapositiva nueva (corregida)');
+});
+
+test('each session keeps the questions as they were asked', async () => {
+  const s1 = await startSession(admin, 'Día 1');
+  await endSession(admin, await evento());
+  const { slides } = await getPresentacion(admin);
+  const changed = structuredClone(slides);
+  changed[1].question = 'Pregunta cambiada después';
+  await savePresentacion(admin, changed, { evento: await evento() });
+  const report = await sessionReport(admin, s1);
+  assert.equal(report.polls[0].question, '¿Cuál sería su conducta inicial en esta paciente?');
+  assert.equal((await sessionReport(admin, await startSession(admin, 'Día 2'))).polls[0].question, 'Pregunta cambiada después');
+});
+
+test('admin view follows presentation edits', async () => {
+  await startSession(admin, 'Día 1');
+  const { slides } = await getPresentacion(admin);
+  const fewer = slides.filter((s) => s.id !== 'p3-2');
+  const seen = waitFor((cb) => subscribeAdmin(admin, cb), (s) => s.slides.length === 6 && s.polls.length === 5);
+  await savePresentacion(admin, fewer);
+  await seen;
+  const p = await waitFor((cb) => subscribePresentacion(nobody, cb), (x) => x.saved);
+  assert.equal(p.slides.length, 6);
 });

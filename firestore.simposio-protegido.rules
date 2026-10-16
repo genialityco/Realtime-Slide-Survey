@@ -16,6 +16,7 @@ service cloud.firestore {
 
     // ── Simposio de Leucemias Agudas y Crónicas ─────────────────────────────
     //   simposio_leucemias_2026/admins                            { uids: [...] }  (set by hand / script)
+    //   simposio_leucemias_2026/presentacion                      editable slides { slides, optionIds, imagenes }
     //   simposio_leucemias_2026/evento                            live state: session, current slide, results
     //   simposio_leucemias_2026/evento/asistentes/{cedula}        registration (personal data)
     //   simposio_leucemias_2026/evento/dispositivos/{uid}         which registration this phone holds
@@ -35,18 +36,16 @@ service cloud.firestore {
       function asistente(cedula) {
         return /databases/$(database)/documents/simposio_leucemias_2026/evento/asistentes/$(cedula);
       }
-      // Must match client/src/simposio.js
+      // presentacion.optionIds is written by the editor next to the slides: { slideId: [optionId, …] }
       function opcionValida(slideId, opcion) {
-        return (slideId in ['p1-inicial', 'p1-revotacion', 'p2-inicial', 'p2-revotacion', 'p3-2']
-                && opcion in ['A', 'B', 'C', 'D'])
-          || (slideId == 'p3-1' && opcion in ['A', 'B', 'C']);
+        return opcion in get(/databases/$(database)/documents/simposio_leucemias_2026/presentacion).data.optionIds[slideId];
       }
 
       // admins: each admin may read the list to know they are one; nobody writes it from the app.
       // evento: everyone reads the live state; only admins drive it.
-      allow get: if doc == 'evento' || (doc == 'admins' && signedIn() && request.auth.uid in resource.data.uids);
+      allow get: if doc in ['evento', 'presentacion'] || (doc == 'admins' && signedIn() && request.auth.uid in resource.data.uids);
       allow list: if false;
-      allow write: if doc == 'evento' && isAdmin();
+      allow write: if doc in ['evento', 'presentacion'] && isAdmin();
 
       match /asistentes/{cedula} {
         function valido(d) {

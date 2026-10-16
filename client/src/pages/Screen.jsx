@@ -2,7 +2,6 @@ import SlideView from '../components/SlideView.jsx';
 import QrCode from '../components/QrCode.jsx';
 import { plural } from '../letter.js';
 import { joinUrl } from '../local.js';
-import { SLIDES } from '../simposio.js';
 import { currentSlide, useEvento, usePublishResults, useSlideKeys } from '../useAdminSession.js';
 
 /**
@@ -19,7 +18,7 @@ export default function Screen() {
 
   const { evento } = state;
   const live = evento.status === 'live';
-  const { slide, poll } = live ? currentSlide(state) : { slide: SLIDES[0], poll: null };
+  const { slide, poll } = live ? currentSlide(state) : { slide: state.slides[0], poll: null };
   const url = joinUrl();
   const qrVisible = live && evento.showQr;
 

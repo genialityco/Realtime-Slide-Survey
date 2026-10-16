@@ -12,7 +12,8 @@ import {
   startSession,
 } from '../data/evento.js';
 import { attendeesCsv, downloadText, resultsCsv } from '../data/export.js';
-import { SLIDES, TITLE } from '../simposio.js';
+import { TITLE } from '../simposio.js';
+import { ensurePresentacion } from '../data/presentacion.js';
 import SlideView from '../components/SlideView.jsx';
 import QrCode from '../components/QrCode.jsx';
 import { useAdmin } from '../components/AdminGate.jsx';
@@ -25,6 +26,9 @@ export default function Presenter() {
   const { state, error, run } = useEvento();
   usePublishResults(state, run);
   useSlideKeys(state, run);
+  useEffect(() => {
+    run(() => ensurePresentacion(db)); // first admin visit: store the built-in slides so they can be edited
+  }, []);
 
   if (!state) return <main className="page">{error || 'Conectando…'}</main>;
 
@@ -45,6 +49,7 @@ export default function Presenter() {
         <span className="stat">
           <b>{attendeeCount}</b> registrados
         </span>
+        <Link className="button" to="/admin/editor">✎ Editar diapositivas</Link>
         <button onClick={() => window.open('/proyeccion', 'proyeccion')}>🖥 Abrir proyección</button>
         <span className="muted small">{user.email}</span>
         <button onClick={logout}>Salir</button>
@@ -84,7 +89,8 @@ function StartSession({ evento, run }) {
 function LiveControls({ state, run, url }) {
   const { evento } = state;
   const { index, slide, poll } = currentSlide(state);
-  const go = (i) => SLIDES[i] && run(() => goToSlide(db, evento, SLIDES[i].id));
+  const { slides } = state;
+  const go = (i) => slides[i] && run(() => goToSlide(db, evento, slides[i].id));
 
   return (
     <div className="presenter">
@@ -100,9 +106,9 @@ function LiveControls({ state, run, url }) {
             ← Anterior
           </button>
           <span>
-            {index + 1} / {SLIDES.length}
+            {index + 1} / {slides.length}
           </span>
-          <button disabled={index >= SLIDES.length - 1} onClick={() => go(index + 1)}>
+          <button disabled={index >= slides.length - 1} onClick={() => go(index + 1)}>
             Siguiente →
           </button>
           <span className="spacer" />
@@ -137,15 +143,15 @@ function LiveControls({ state, run, url }) {
             <p className="warn small">Este enlace usa «localhost»: en el evento usa la URL publicada.</p>
           )}
         </div>
-        {SLIDES.map((s, i) => {
+        {slides.map((s, i) => {
           const p = state.polls.find((x) => x.slideId === s.id);
           return (
             <button key={s.id} className={`slide-thumb ${s.id === slide.id ? 'is-selected' : ''}`} onClick={() => go(i)}>
               <span className="slide-thumb__index">{i + 1}</span>
               <div className="slide-thumb__body">
-                <span className="tag">{s.type === 'poll' ? 'Encuesta' : 'Portada'}</span>
+                <span className="tag">{s.type === 'poll' ? 'Encuesta' : 'Contenido'}</span>
                 {p?.resultsVisible && <span className="tag tag--copy">Resultados visibles</span>}
-                <div className="slide-thumb__title">{s.title || 'Portada'}</div>
+                <div className="slide-thumb__title">{s.title || s.question || '(solo imagen)'}</div>
                 {p && <small className="muted">{plural(p.total, 'voto')}</small>}
               </div>
             </button>

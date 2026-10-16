@@ -1,8 +1,21 @@
 # Encuesta en vivo · Simposio de Leucemias Agudas y Crónicas
 
-App exclusiva para el simposio (16 y 17 de octubre de 2026): las 7 diapositivas están en
-[client/src/simposio.js](client/src/simposio.js) — portada (1.jpg) y 6 preguntas sobre 2.jpg, con votación
-inicial y revotación de los dos contrapunteos.
+App exclusiva para el simposio (16 y 17 de octubre de 2026). Las diapositivas se editan desde
+**/admin/editor** y se guardan en Firestore; la presentación inicial (portada 1.jpg y 6 preguntas sobre 2.jpg)
+está en [client/src/simposio.js](client/src/simposio.js) y se usa la primera vez o con «Restaurar presentación original».
+
+### Editor (/admin/editor)
+
+- Textos: título superior, caso/texto, pregunta. Opciones: 2 a 10, agregar, quitar, reordenar.
+- Diapositivas: agregar (encuesta o contenido), duplicar, eliminar, reordenar.
+- Diseño: fondo (plantillas 1.jpg / 2.jpg, subir imagen, sin imagen), colores, tamaño del texto,
+  espacio superior, oscurecer; «Aplicar este diseño a todas».
+- Imagen dentro de la diapositiva (derecha, izquierda, arriba, abajo; tamaño).
+- Gráfico de resultados: barras horizontales, barras verticales, circular o dona.
+- Vista previa de proyección, celular y resultados de ejemplo. En proyección el contenido se ajusta solo
+  para que siempre quepa. Al guardar, celulares y proyección se actualizan en vivo.
+- Las imágenes se suben a Firebase Storage (`simposio_leucemias_2026/imagenes/`). Cada sesión guarda una copia
+  de las diapositivas: editar después no cambia los resultados guardados.
 
 Publicada en **https://simposio-leucemias.web.app** (admin: **/admin**, proyección: **/proyeccion**).
 
@@ -29,10 +42,11 @@ Corre sobre **Firebase**, proyecto `lenovo-experiences`, y todo vive en una sola
 ```
 simposio_leucemias_2026/
   admins                        { uids: [...] }        quién administra
+  presentacion                  { slides, optionIds, imagenes }   diapositivas editables
   evento                        estado en vivo: sessionId, slideId, showQr, resultsVisible, results
   evento/asistentes/{cédula}    nombre, correo, uid     (solo admins)
   evento/dispositivos/{uid}     { cedula, nombre }      (registro de cada celular)
-  evento/sesiones/{sessionId}   label, status, fechas
+  evento/sesiones/{sessionId}   label, status, fechas, slides (copia al iniciar)
   evento/sesiones/{sessionId}/votos/{slideId}__{cédula}   { opcion }   pollInstanceId = sessionId:slideId
 ```
 
