@@ -8,3 +8,7 @@ client/.env.production.local
 firestore-debug.log
 firebase-debug.log
 ui-debug.log
+
+# Premios Geniality: respaldos locales de la presentación
+scripts/premios/respaldos/
+scripts/premios/muestra-*.svg
