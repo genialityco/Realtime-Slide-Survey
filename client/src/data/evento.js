@@ -155,7 +155,8 @@ export function subscribeAdmin(db, onChange, onError = console.error) {
       resultsVisible: !!evento.visible?.[p.id],
       published: evento.published?.[p.id] ?? null,
     }));
-    onChange({ evento, slides, polls, attendeeCount });
+    const voterCount = new Set(votes.map((v) => v.uid)).size; // anonymous phones that voted this session
+    onChange({ evento, slides, polls, attendeeCount, voterCount });
   };
 
   const unsubEvento = onSnapshot(

@@ -34,7 +34,7 @@ export default function Presenter() {
 
   if (!state) return <main className="page">{error || 'Conectando…'}</main>;
 
-  const { evento, attendeeCount } = state;
+  const { evento, voterCount } = state;
   const live = evento.status === 'live';
   const url = joinUrl();
 
@@ -49,7 +49,7 @@ export default function Presenter() {
         )}
         <span className="spacer" />
         <span className="stat">
-          <b>{attendeeCount}</b> registrados
+          <b>{voterCount}</b> participantes
         </span>
         <Link className="button" to="/admin/editor">✎ Editar diapositivas</Link>
         <button onClick={() => window.open('/proyeccion', 'proyeccion')}>🖥 Abrir proyección</button>
@@ -71,8 +71,8 @@ function StartSession({ evento, run }) {
     <section className="card">
       <h3>Iniciar sesión</h3>
       <p className="muted">
-        Cada sesión guarda sus votos por separado (p. ej. «Ensayo», «Día 1»). Los asistentes registrados se conservan
-        entre sesiones: no tienen que volver a registrarse.
+        Cada sesión guarda sus votos por separado (p. ej. «Ensayo», «Día 1»). La encuesta es anónima: un voto por
+        celular y pregunta.
       </p>
       <form
         className="row"

@@ -5,7 +5,7 @@
 /** Root collection, exclusive to this event (Firestore documents and the Storage folder). */
 export const ROOT = 'simposio_leucemias_2026';
 
-export const TITLE = 'Simposio de Leucemias Agudas y Crónicas';
+export const TITLE = 'Premios Geniality';
 
 export const BACKGROUNDS = [
   { url: '/media/1.jpg', label: 'Portada del simposio', contentTop: 0 },

@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { auth, db } from '../firebase.js';
-import { myRegistration, register, subscribe, vote } from '../data/publico.js';
-import { getPresentacion } from '../data/presentacion.js';
-import { registrationCache } from '../local.js';
-import { BACKGROUNDS, TITLE } from '../simposio.js';
+import { subscribe, vote } from '../data/publico.js';
 import SlideView from '../components/SlideView.jsx';
 import { letter } from '../letter.js';
 import { Rich } from '../rich.jsx';
@@ -25,128 +22,28 @@ function useAnonymousUser() {
 }
 
 export default function Audience() {
-  const { user, error: authError } = useAnonymousUser();
-  const [registration, setRegistration] = useState(undefined); // undefined = checking, null = needs the form
-  const [error, setError] = useState('');
+  const { user, error } = useAnonymousUser();
 
-  // Registration is asked once per phone: the cache shows the live view instantly; Firestore confirms it.
-  useEffect(() => {
-    if (!user) return;
-    const cached = registrationCache.get(user.uid);
-    if (cached) setRegistration(cached);
-    myRegistration(db, user.uid)
-      .then((r) => {
-        if (r) registrationCache.set(user.uid, r);
-        else registrationCache.clear();
-        setRegistration(r);
-      })
-      .catch((e) => (cached ? null : setError(e.message)));
-  }, [user]);
-
-  if (authError || error) {
+  if (error) {
     return (
       <main className="page page--narrow audience">
-        <p className="error">{authError || error}</p>
+        <p className="error">{error}</p>
         <button onClick={() => location.reload()}>Reintentar</button>
       </main>
     );
   }
-  if (!user || registration === undefined) return <main className="page page--narrow audience">Cargando…</main>;
-
-  if (!registration) {
-    return (
-      <Registration
-        uid={user.uid}
-        onDone={(r) => {
-          registrationCache.set(user.uid, r);
-          setRegistration(r);
-        }}
-      />
-    );
-  }
-  return <Live uid={user.uid} registration={registration} />;
+  if (!user) return <main className="page page--narrow audience">Cargando…</main>;
+  // Anonymous survey: the phone's anonymous uid is the voter key (one vote per phone and question).
+  return <Live uid={user.uid} />;
 }
 
-function Registration({ uid, onDone }) {
-  const [cover, setCover] = useState(null);
-  useEffect(() => {
-    getPresentacion(db).then((p) => setCover(p.slides[0]?.style?.backgroundImage || BACKGROUNDS[0].url)).catch(() => setCover(BACKGROUNDS[0].url));
-  }, []);
-  const [form, setForm] = useState({ nombre: '', cedula: '', correo: '', consentimiento: false });
-  const [error, setError] = useState('');
-  const [sending, setSending] = useState(false);
-  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
-
-  async function submit(e) {
-    e.preventDefault();
-    setError('');
-    setSending(true);
-    try {
-      onDone(await register(db, uid, form));
-    } catch (err) {
-      setError(err.message);
-      setSending(false);
-    }
-  }
-
-  return (
-    <main className="page page--narrow audience">
-      {cover && <img className="audience__banner" src={cover} alt={TITLE} />}
-      <h2>Encuesta en vivo</h2>
-      <p className="muted">Regístrate una sola vez para participar en las votaciones del simposio.</p>
-      <form className="card form" onSubmit={submit}>
-        <label>
-          Nombre completo
-          <input value={form.nombre} onChange={(e) => set({ nombre: e.target.value })} autoComplete="name" required />
-        </label>
-        <label>
-          Cédula
-          <input
-            value={form.cedula}
-            onChange={(e) => set({ cedula: e.target.value })}
-            inputMode="numeric"
-            pattern="[0-9 .\-]{5,20}"
-            required
-          />
-        </label>
-        <label>
-          Correo electrónico
-          <input
-            type="email"
-            value={form.correo}
-            onChange={(e) => set({ correo: e.target.value })}
-            autoComplete="email"
-            required
-          />
-        </label>
-        <label className="consent">
-          <input
-            type="checkbox"
-            checked={form.consentimiento}
-            onChange={(e) => set({ consentimiento: e.target.checked })}
-            required
-          />
-          <span>
-            Autorizo el tratamiento de mis datos personales (nombre, cédula y correo) para el registro de asistencia y
-            el análisis de las respuestas de este evento, conforme a la Ley 1581 de 2012.
-          </span>
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button className="primary big" disabled={sending || !form.consentimiento}>
-          {sending ? 'Enviando…' : 'Registrarme y continuar'}
-        </button>
-      </form>
-    </main>
-  );
-}
-
-function Live({ uid, registration }) {
+function Live({ uid }) {
   const [state, setState] = useState(null);
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
 
-  useEffect(() => subscribe(db, registration.cedula, setState, (e) => setError(e.message)), [registration.cedula]);
+  useEffect(() => subscribe(db, uid, setState, (e) => setError(e.message)), [uid]);
 
   useEffect(() => {
     const up = () => setOnline(true);
@@ -167,7 +64,7 @@ function Live({ uid, registration }) {
     setError('');
     setSending(true);
     try {
-      await vote(db, uid, state.sessionId, state.slide.id, registration.cedula, opcion);
+      await vote(db, uid, state.sessionId, state.slide.id, uid, opcion);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -177,7 +74,7 @@ function Live({ uid, registration }) {
 
   const header = (
     <header className="audience__header">
-      <span>Hola, {registration.nombre.split(' ')[0]}</span>
+      <span>Encuesta anónima</span>
       {!online && <span className="badge">Sin conexión…</span>}
     </header>
   );
@@ -198,7 +95,7 @@ function Live({ uid, registration }) {
         <p className="waiting">
           {state.status === 'ended'
             ? '¡Gracias por participar!'
-            : 'Estás registrado. Las preguntas aparecerán aquí automáticamente cuando se proyecten.'}
+            : 'Las preguntas aparecerán aquí automáticamente cuando se proyecten.'}
         </p>
       </main>
     );
